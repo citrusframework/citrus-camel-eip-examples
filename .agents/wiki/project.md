@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Project Overview
 
-## Project overview
+## What this project is
 
 A chaptered tutorial site covering all 65 Enterprise Integration Patterns (Hohpe & Woolf) implemented with Apache Camel on three runtimes: Quarkus (Java DSL), Spring Boot (Java DSL), and YAML DSL. Jekyll site + runnable examples per runtime.
 
@@ -10,11 +10,6 @@ A chaptered tutorial site covering all 65 Enterprise Integration Patterns (Hohpe
 - **Codetabs** — use `{% include codetabs.html langs="Quarkus|Spring Boot|YAML DSL" %}` followed by one fenced code block per tab (order must match labels). Not every block needs tabs — only tabify route definitions and configuration that differ per runtime.
 - **Shipping domain** — all examples use orders, inventory, payments, shipping, notifications
 - **No Co-authored-by trailers** in git commits
-
-## Start with the wiki
-
-At the start of each task, check `.agents/wiki/index.md` to decide whether wiki context is needed before acting.
-Don't read the wiki in full. Use the index and follow links only when they are relevant to the task.
 
 ## Stack
 
@@ -71,8 +66,3 @@ python3 scripts/generate_diagram.py  # imported as a module, see existing usage
 - Chapters end with a verification status footer (unverified until run in real environment)
 - Diagrams: `{% include excalidraw.html file="name" alt="..." caption="Figure N.x — ..." %}`
 - Quote YAML front matter values that contain colons
-
-## Update the wiki
-
-After completing a task, offer to update the wiki if the task yielded durable knowledge that could benefit future work, then wait for user approval.
-This includes new processes, architecture decisions, or insights that go beyond the immediate task.

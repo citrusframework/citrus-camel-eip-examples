@@ -900,7 +900,30 @@ t.when(
 );
 ```
 
-### Pattern 5: KafkaMessageFilter for targeted receive
+### Pattern 5: Sending to Camel-internal endpoints (direct:, seda:)
+
+When a test needs to send to a Camel-internal endpoint like `direct:` or `seda:`, use `CamelEndpointBuilder` with an explicit `camelContext` reference. A plain URI string (e.g., `.endpoint("direct:send-command")`) causes Citrus to create a standalone Camel context that cannot resolve the route registered in the application's context.
+
+```java
+import org.citrusframework.camel.endpoint.CamelEndpointBuilder;
+
+t.when(
+    camel()
+        .send()
+        .endpoint(new CamelEndpointBuilder()
+                .endpointUri("direct:send-command")
+                .camelContext(camelContext)
+                .build())
+        .fork(true)
+        .message()
+        .body(Resources.create("templates/command.json"))
+        .header("kafka.KEY", "PAY-${id}")
+);
+```
+
+This is the correct way to test producer routes that accept messages on a `direct:` endpoint and forward them to Kafka (or any other destination). The test can then verify the output with a standard Kafka `receive()`.
+
+### Pattern 6: KafkaMessageFilter for targeted receive
 
 When multiple messages may be on a topic and you need a specific one:
 
@@ -922,7 +945,7 @@ t.then(
 );
 ```
 
-### Pattern 6: Redis Pub/Sub testing
+### Pattern 7: Redis Pub/Sub testing
 
 Uses Camel processor to bridge to Redis (Quarkus uses `RedisDataSource`, Spring Boot uses `StringRedisTemplate`):
 

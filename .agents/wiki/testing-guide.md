@@ -972,6 +972,62 @@ t.when(
 redisTemplate.convertAndSend("eip.orders.notifications", ...);
 ```
 
+### Pattern 8: Smoke test for log-only routes (sleep + controlBus)
+
+When a route's output endpoints are `direct:` routes that only log (no Kafka output topic to receive from), use sleep + controlBus status check as a smoke test:
+
+```java
+t.when(
+    send()
+        .endpoint("kafka:eip.orders.shipped")
+        .message()
+        .body(Resources.create("templates/shipped-order.json"))
+        .header("kafka.KEY", "${id}")
+);
+
+t.then(sleep().seconds(5));
+
+t.then(
+    camel().camelContext(camelContext)
+        .controlBus()
+        .route("notification-recipient-list")
+        .status()
+        .result(ServiceStatus.Started)
+);
+```
+
+This verifies the route processed the message without crashing — not full output verification, but sufficient when there's no downstream topic.
+
+---
+
+## Testing Pitfalls
+
+### Kafka `auto.offset.reset=latest` on intermediate topics
+
+When a route has multi-hop flows (topic A → route1 → topic B → route2 → topic C), sending a test message to topic A may silently fail because the consumer on auto-created intermediate topic B hasn't established its offset yet. By the time it does, the message is already past.
+
+**Workaround**: Send directly to the intermediate topic with pre-set headers that the second route expects. This bypasses the timing issue entirely. Example from ch08 message-expiration test:
+
+```java
+// Instead of sending to kafka:eip.metadata.orders (two-hop flow),
+// send directly to kafka:eip.metadata.orders.expiring with pre-set headers
+t.when(
+    send()
+        .endpoint("kafka:eip.metadata.orders.expiring")
+        .message()
+        .body(Resources.create("templates/order.json"))
+        .header("kafka.KEY", "${id}")
+        .header("messageCreatedAt", System.currentTimeMillis())
+        .header("messageExpiresAt", System.currentTimeMillis() + 60_000)
+);
+```
+
+### Cross-route interference on shared topics
+
+When multiple routes consume from the same topic with different consumer groups (e.g., ContentBasedRouter and MessageFilter both read `eip.orders.placed`), test data for one route can trigger unintended behavior in the other.
+
+**Workaround**: Design test data to be inert for unrelated routes. For example, keep amounts below 100 in ContentBasedRouter tests to avoid triggering the MessageFilter (which filters `amount >= 100`).
+
 ---
 
 ## CI Workflow

@@ -1022,6 +1022,43 @@ t.when(
 );
 ```
 
+### Empty `message()` assertions give false confidence
+
+An empty `receive().message()` only proves *some* message arrived on the topic. It could be a leftover from a demo generator, another test, or a prior run. Always verify at least one field that ties the received message to your test input:
+
+- **Headers the route sets**: e.g., `.header("messageExpired", "false")` or `.header("BulkOrderId", "BULK-${id}")`
+- **Body via a template**: e.g., `.body(Resources.create("templates/order.json"))`
+
+When the body format is unreliable (e.g., after `unmarshal().json()` without re-marshalling, where the Kafka body becomes `Map.toString()` instead of JSON), verify headers instead.
+
+### Cover all branches of route logic
+
+A single happy-path test is not enough when the route contains branching logic (choice, filter, content-based router). Write one test per distinct outcome to verify each branch is reachable and produces the correct result.
+
+**Example**: A Format Indicator route with a `choice()` on `contentType` has three branches (JSON → processed, XML → processed, unknown → dead letter). Test all three by sending messages with different `contentType` headers and verifying each lands on the expected output topic:
+
+```java
+// Branch 1: JSON format → processed topic
+send().endpoint("kafka:eip.metadata.orders.tagged")
+    .message().body(jsonBody).header("contentType", "application/json");
+receive().endpoint("kafka:eip.metadata.orders.processed?consumerGroup=citrus-json-group")
+    .message().body(jsonBody);
+
+// Branch 2: XML format → processed topic
+send().endpoint("kafka:eip.metadata.orders.tagged")
+    .message().body(xmlBody).header("contentType", "application/xml");
+receive().endpoint("kafka:eip.metadata.orders.processed?consumerGroup=citrus-xml-group")
+    .message().body(xmlBody);
+
+// Branch 3: Unknown format → dead letter topic
+send().endpoint("kafka:eip.metadata.orders.tagged")
+    .message().body(plainBody).header("contentType", "text/plain");
+receive().endpoint("kafka:eip.metadata.orders.dead?consumerGroup=citrus-dead-group")
+    .message().body(plainBody);
+```
+
+The same principle applies to filters (test messages that pass AND messages that are filtered out), enrichers (verify the enriched fields are present), and aggregators (verify the aggregation header and reassembled output).
+
 ### Cross-route interference on shared topics
 
 When multiple routes consume from the same topic with different consumer groups (e.g., ContentBasedRouter and MessageFilter both read `eip.orders.placed`), test data for one route can trigger unintended behavior in the other.

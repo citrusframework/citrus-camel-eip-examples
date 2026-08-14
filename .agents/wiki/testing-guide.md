@@ -62,6 +62,33 @@ Only include fields the route actually uses. Simpler templates are better — ch
 
 **YAML DSL uses different variable names**: `${order.id}`, `${order.status}` — because YAML DSL tests define variables with `name: order.id` (dotted names), while Java tests use `variable("id", ...)`.
 
+### Design routes for testability
+
+Routes that send to Kafka should produce well-formed JSON, not Java `Map.toString()`. A route that does `unmarshal().json()` converts the body from JSON to a Java Map — if it then sends that Map to Kafka without re-marshalling, the output is `{order_id=1234, ...}` (not valid JSON), making body verification in tests impossible.
+
+**Fix**: add `marshal().json()` before every `to("kafka:...")` that follows an unmarshal:
+
+```java
+// BEFORE — body on Kafka is Map.toString(), untestable
+from("kafka:eip.orders.placed")
+    .unmarshal().json()
+    .filter(simple("${body[amount]} >= 100"))
+        .log("High-value order ${body[order_id]}")
+        .to("kafka:eip.orders.high-value");
+
+// AFTER — body on Kafka is proper JSON, testable
+from("kafka:eip.orders.placed")
+    .unmarshal().json()
+    .filter(simple("${body[amount]} >= 100"))
+        .log("High-value order ${body[order_id]}")
+        .marshal().json()
+        .to("kafka:eip.orders.high-value");
+```
+
+The same applies to `choice()` routes — add `marshal().json()` in each branch before the Kafka output. The `log()` step must come BEFORE `marshal()` so `${body[field]}` expressions still work against the Map.
+
+Routes that already call `marshal().json()` (like the Splitter route) are already testable. Routes that pass the body through unchanged (no `unmarshal()`) are also fine — the original JSON string arrives on the output topic as-is.
+
 ### Use unique consumer groups
 
 Every Kafka receive action must use a unique `consumerGroup` to avoid conflicts between tests and between the test and the route itself:
@@ -998,6 +1025,68 @@ t.then(
 
 This verifies the route processed the message without crashing — not full output verification, but sufficient when there's no downstream topic.
 
+### Pattern 9: Verify message was NOT sent (expectTimeout)
+
+When testing filters or conditional routing, verify that messages that should be dropped do NOT appear on the output topic. Use `expectTimeout` — it waits for a configurable duration and passes only if no message arrives:
+
+```java
+import static org.citrusframework.actions.ReceiveTimeoutAction.Builder.expectTimeout;
+
+// Send a low-value order that should be filtered out
+t.when(
+    send()
+        .endpoint("kafka:eip.orders.placed")
+        .message()
+        .body(Resources.create("templates/order.json"))
+        .header("kafka.KEY", "${id}")
+);
+
+// Verify nothing arrives on the high-value topic
+t.then(
+    expectTimeout()
+        .endpoint("kafka:eip.orders.high-value?consumerGroup=citrus-filter-reject-group")
+        .timeout(5000)
+);
+```
+
+YAML DSL equivalent:
+
+```yaml
+- expectTimeout:
+    endpoint: >-
+      kafka:eip.orders.high-value?server=${kafka.broker}&consumerGroup=citrus-filter-reject-group
+    wait: 5000
+```
+
+Use a unique consumer group for the `expectTimeout` action so it doesn't interfere with other receive actions on the same topic.
+
+### Pattern 10: Verify all split messages (splitter coverage)
+
+When testing a Splitter route, verify that ALL expected messages are produced — not just one. Use a generic template with `@ignore@` for fields whose values vary, and receive once per expected split item:
+
+```java
+// Template: templates/item.json
+// { "item_sku": "@ignore@", "quantity": "@ignore@" }
+
+t.then(
+    repeatOnError()
+        .until((i, context) -> i > 25)
+        .autoSleep(Duration.ofMillis(500))
+        .actions(
+            receive()
+                .endpoint("kafka:eip.orders.individual?consumerGroup=citrus-individual-group")
+                .message()
+                .body(Resources.create("templates/item.json")),
+            receive()
+                .endpoint("kafka:eip.orders.individual?consumerGroup=citrus-individual-group")
+                .message()
+                .body(Resources.create("templates/item.json"))
+        )
+);
+```
+
+Both receives share the same consumer group so the second receive picks up where the first left off. Wrapping both in a single `repeatOnError` block ensures they retry together if the splitter hasn't finished processing.
+
 ---
 
 ## Testing Pitfalls
@@ -1029,7 +1118,7 @@ An empty `receive().message()` only proves *some* message arrived on the topic. 
 - **Headers the route sets**: e.g., `.header("messageExpired", "false")` or `.header("BulkOrderId", "BULK-${id}")`
 - **Body via a template**: e.g., `.body(Resources.create("templates/order.json"))`
 
-When the body format is unreliable (e.g., after `unmarshal().json()` without re-marshalling, where the Kafka body becomes `Map.toString()` instead of JSON), verify headers instead.
+When the body format is unreliable (e.g., after `unmarshal().json()` without re-marshalling, where the Kafka body becomes `Map.toString()` instead of JSON), verify headers instead — or better yet, fix the route by adding `marshal().json()` before the Kafka output (see [Design routes for testability](#design-routes-for-testability)).
 
 ### Cover all branches of route logic
 

@@ -1087,6 +1087,31 @@ t.then(
 
 Both receives share the same consumer group so the second receive picks up where the first left off. Wrapping both in a single `repeatOnError` block ensures they retry together if the splitter hasn't finished processing.
 
+### Pattern 11: Deferred initialization for external-service beans
+
+When a production bean eagerly connects to an external service in `@PostConstruct` (e.g., seeding a Redis catalog, preloading a database cache), the Spring Boot test context will fail because Citrus hasn't started the infrastructure yet. The fix:
+
+1. Add a toggle property with a default of `true` (no change to production behavior)
+2. Split `@PostConstruct` into a guard method + a public initialization method
+3. Set the toggle to `false` in test `application.properties`
+4. `@Autowired` the bean into the test and call the public method after infrastructure is ready
+
+```java
+// In the test — call BEFORE waitForCamelRouteStarted if the route depends on the seeded data
+@Autowired
+RedisProductCatalog redisProductCatalog;
+
+@Test
+public void shouldEnrichOrderWithProductData() {
+    redisProductCatalog.seedCatalog();
+    t.given(waitForCamelRouteStarted("content-enricher", camelContext));
+    t.when(send()...);
+    t.then(receive()...);
+}
+```
+
+This only affects **Spring Boot** tests. Quarkus manages the lifecycle differently — `@PostConstruct` runs after Citrus `beforeSuite` has already started compose, so the service is available. If you encounter the same issue in Quarkus in the future, apply the same pattern.
+
 ---
 
 ## Testing Pitfalls
@@ -1148,6 +1173,54 @@ receive().endpoint("kafka:eip.metadata.orders.dead?consumerGroup=citrus-dead-gro
 
 The same principle applies to filters (test messages that pass AND messages that are filtered out), enrichers (verify the enriched fields are present), and aggregators (verify the aggregation header and reassembled output).
 
+### Spring Boot `@PostConstruct` and infrastructure lifecycle
+
+When a production bean has `@PostConstruct` that connects to an external service (Redis, database, message broker), the Spring Boot test context loads **before** Citrus `beforeSuite` starts the compose infrastructure. The `@PostConstruct` fires during context creation, the service isn't running yet, and the test fails with a connection error (e.g., `RedisConnectionFailureException`).
+
+**Fix**: make the eager initialization conditional and call it explicitly in the test after infrastructure is up. See [Pattern 11](#pattern-11-deferred-initialization-for-external-service-beans).
+
+Production bean:
+
+```java
+@Component
+public class RedisProductCatalog {
+
+    @Value("${redis.catalog.seed:true}")
+    boolean seedEnabled;
+
+    @PostConstruct
+    void init() {
+        if (seedEnabled) seedCatalog();   // skipped in tests
+    }
+
+    public void seedCatalog() {
+        // actual initialization logic (Redis writes, DB inserts, etc.)
+    }
+}
+```
+
+Test `application.properties`:
+
+```properties
+redis.catalog.seed=false
+```
+
+Test class:
+
+```java
+@Autowired
+RedisProductCatalog redisProductCatalog;
+
+@Test
+public void shouldEnrichOrder() {
+    redisProductCatalog.seedCatalog();   // call after infra is up
+    t.given(waitForCamelRouteStarted("content-enricher", camelContext));
+    // ...
+}
+```
+
+This pattern applies whenever a `@Component`/`@Service` connects to infrastructure in `@PostConstruct`. The default property value stays `true` so production behavior is unchanged.
+
 ### Cross-route interference on shared topics
 
 When multiple routes consume from the same topic with different consumer groups (e.g., ContentBasedRouter and MessageFilter both read `eip.orders.placed`), test data for one route can trigger unintended behavior in the other.
@@ -1197,6 +1270,7 @@ env:
 ### Per runtime (Quarkus / Spring Boot)
 
 - [ ] Make all demo data generators toggleable via config property
+- [ ] Check for `@PostConstruct` beans that connect to external services — add toggle property if needed (Spring Boot only, see Pattern 11)
 - [ ] Copy `EipTestSupport.java` into the test package
 - [ ] Create `config/EipInfraSetup.java` (use correct annotations per runtime)
 - [ ] Create `_infra/compose.yaml` with required services only

@@ -64,6 +64,30 @@ Only include fields the route actually uses. Simpler templates are better — ch
 
 ### Design routes for testability
 
+**Route all branches to named routes** — when a `choice()` route has an `otherwise()` branch that only logs, replace the inline `.log(...)` with a `direct:` route that has its own `routeId`. This makes the fallback branch verifiable via `assertProcessedExchanges()`:
+
+```java
+// BEFORE — otherwise() just logs, not verifiable via exchange counts
+.otherwise()
+    .log("Unknown event_type '${body[event_type]}' — skipping")
+
+// AFTER — otherwise() routes to a named handler, verifiable
+.otherwise()
+    .to("direct:handle-order_unknown")
+
+from("direct:handle-order_unknown")
+    .routeId("handle-order-unknown")
+    .log("Unknown event_type '${body[event_type]}' — skipping");
+```
+
+The test can then verify the fallback branch was exercised:
+
+```java
+t.then(assertProcessedExchanges("handle-order-unknown", 1, camelContext));
+```
+
+This principle applies to any inline processing that should be testable: extract it into a named `direct:` route so the exchange shows up in route-level MBean statistics.
+
 Routes that send to Kafka should produce well-formed JSON, not Java `Map.toString()`. A route that does `unmarshal().json()` converts the body from JSON to a Java Map — if it then sends that Map to Kafka without re-marshalling, the output is `{order_id=1234, ...}` (not valid JSON), making body verification in tests impossible.
 
 **Fix**: add `marshal().json()` before every `to("kafka:...")` that follows an unmarshal:
@@ -178,6 +202,15 @@ Test dependencies (always the same 6 core + extras as needed):
 
 <!-- Add when sending to Pulsar endpoints in tests -->
 <dependency><groupId>org.apache.camel</groupId><artifactId>camel-endpointdsl</artifactId><scope>test</scope></dependency>
+
+<!-- Add when testing SQL/database routes -->
+<dependency><groupId>org.citrusframework</groupId><artifactId>citrus-sql</artifactId><version>${citrus.version}</version><scope>test</scope></dependency>
+
+<!-- Add when using assertProcessedExchanges (ManagedRouteMBean) -->
+<!-- Quarkus: -->
+<dependency><groupId>org.apache.camel.quarkus</groupId><artifactId>camel-quarkus-management</artifactId></dependency>
+<!-- Spring Boot: use camel-spring-boot-starter-management instead -->
+<!-- Standalone Camel Main: use camel-management instead -->
 ```
 
 **IMPORTANT**: Use `quarkus-junit` (NOT `quarkus-junit5`).
@@ -999,31 +1032,98 @@ t.when(
 redisTemplate.convertAndSend("eip.orders.notifications", ...);
 ```
 
-### Pattern 8: Smoke test for log-only routes (sleep + controlBus)
+### Pattern 8: Verify exchange processing via ManagedRouteMBean
 
-When a route's output endpoints are `direct:` routes that only log (no Kafka output topic to receive from), use sleep + controlBus status check as a smoke test:
+When a route has no output topic to receive from (log-only, `direct:` handler, etc.), verify that the route actually **processed** the exchange — not just that it's still running. Use Camel's `ManagedCamelContext` to query the route's MBean for completed/failed exchange counts.
+
+**Requires** Camel management to be on the classpath so that `ManagedCamelContext` and `ManagedRouteMBean` are available. Add the runtime-appropriate dependency:
+- **Quarkus**: `camel-quarkus-management`
+- **Spring Boot**: `camel-spring-boot-starter-management` (or `camel-management` for standalone Camel Main)
+
+**EipTestSupport helper** (add to the shared interface):
+
+```java
+import java.util.function.Predicate;
+import org.apache.camel.api.management.ManagedCamelContext;
+import org.apache.camel.api.management.mbean.ManagedRouteMBean;
+import org.citrusframework.exceptions.CitrusRuntimeException;
+import org.citrusframework.exceptions.ValidationException;
+
+default TestActionBuilder<?> assertProcessedExchanges(String routeId, long expected, CamelContext camelContext) {
+    return assertProcessedExchanges(routeId, it -> it == expected, camelContext);
+}
+
+default TestActionBuilder<?> assertProcessedExchanges(String routeId, Predicate<Long> check, CamelContext camelContext) {
+    return repeatOnError()
+            .until((i, context) -> i > 20)
+            .autoSleep(Duration.ofSeconds(1))
+            .actions(
+                context -> {
+                    ManagedCamelContext managedContext = camelContext.getCamelContextExtension()
+                            .getContextPlugin(ManagedCamelContext.class);
+                    ManagedRouteMBean routeMBean = managedContext.getManagedRoute(routeId);
+
+                    if (routeMBean != null) {
+                        long failed = routeMBean.getExchangesFailed();
+                        if (failed > 0) {
+                            throw new ValidationException("Route '%s' has %d failed exchanges"
+                                    .formatted(routeId, failed));
+                        }
+                        long completed = routeMBean.getExchangesCompleted();
+                        if (!check.test(completed)) {
+                            throw new ValidationException("Route '%s' has %d completed exchanges"
+                                    .formatted(routeId, completed));
+                        }
+                    } else {
+                        throw new CitrusRuntimeException("No managed route for routeId '%s'"
+                                .formatted(routeId));
+                    }
+                }
+            );
+}
+```
+
+**Usage — exact count**:
 
 ```java
 t.when(
     send()
-        .endpoint("kafka:eip.orders.shipped")
+        .endpoint("kafka:eip.consumer.events")
         .message()
-        .body(Resources.create("templates/shipped-order.json"))
-        .header("kafka.KEY", "${id}")
+        .body(Resources.create("templates/order.json"))
+        .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
 );
 
-t.then(sleep().seconds(5));
-
 t.then(
-    camel().camelContext(camelContext)
-        .controlBus()
-        .route("notification-recipient-list")
-        .status()
-        .result(ServiceStatus.Started)
+    assertProcessedExchanges("event-driven-consumer", 1, camelContext)
 );
 ```
 
-This verifies the route processed the message without crashing — not full output verification, but sufficient when there's no downstream topic.
+**Usage — predicate** (e.g., timer-based routes where count is non-deterministic):
+
+```java
+t.then(
+    assertProcessedExchanges("polling-consumer", it -> it > 1, camelContext)
+);
+```
+
+**Usage — verify dispatched branch**:
+
+```java
+// Send to dispatcher route, verify the specific handler route processed it
+t.when(
+    send()
+        .endpoint("kafka:eip.consumer.dispatch")
+        .message()
+        .body(Resources.create("templates/order.json"))
+);
+
+t.then(
+    assertProcessedExchanges("handle-order-placed", 1, camelContext)
+);
+```
+
+This is strictly better than the old sleep+controlBus approach: it verifies the exchange was **completed without errors**, not just that the route is still in `Started` state.
 
 ### Pattern 9: Verify message was NOT sent (expectTimeout)
 
@@ -1111,6 +1211,74 @@ public void shouldEnrichOrderWithProductData() {
 ```
 
 This only affects **Spring Boot** tests. Quarkus manages the lifecycle differently — `@PostConstruct` runs after Citrus `beforeSuite` has already started compose, so the service is available. If you encounter the same issue in Quarkus in the future, apply the same pattern.
+
+### Pattern 12: SQL database interaction with citrus-sql
+
+When a route polls from a database (SQL Polling Consumer), use `citrus-sql` to insert test data and verify database state changes. This requires the `citrus-sql` dependency and injecting the `DataSource`.
+
+**Dependency**:
+
+```xml
+<dependency>
+    <groupId>org.citrusframework</groupId>
+    <artifactId>citrus-sql</artifactId>
+    <version>${citrus.version}</version>
+    <scope>test</scope>
+</dependency>
+```
+
+**Inject the DataSource** (Quarkus — both annotations needed):
+
+```java
+@Inject
+@BindToRegistry
+DataSource dataSource;
+```
+
+**Insert test data, verify Kafka output, then verify DB state change**:
+
+```java
+t.when(
+    sql(dataSource)
+        .statement("INSERT INTO orders.orders (customer_id, item_sku, quantity, amount) "
+                + "VALUES ('CUST-00${id}', 'SKU-${id}', '1', '${amount}')")
+);
+
+t.then(
+    repeatOnError()
+        .until((i, context) -> i > 15)
+        .autoSleep(Duration.ofSeconds(1))
+        .actions(
+            receive()
+                .endpoint("kafka:eip.orders.placed?consumerGroup=citrus-placed-group")
+                .message()
+                .body("""
+                {
+                  "id": "@variable(order_id)@",
+                  "customer_id": "CUST-00${id}",
+                  "status": "PLACED",
+                  "amount": ${amount}.0,
+                  "item_sku": "SKU-${id}",
+                  "quantity": 1,
+                  "created_at": "@ignore@"
+                }
+                """)
+        )
+);
+
+// Verify the route's onConsume SQL updated the row status
+t.then(
+    sql(dataSource)
+        .query()
+        .statement("SELECT status FROM orders.orders WHERE id = '${order_id}'")
+        .validate("status", "PROCESSING")
+);
+```
+
+Key points:
+- Use `@variable(order_id)@` in the receive body to capture the auto-generated DB primary key into a Citrus variable for later SQL query validation.
+- The `@ignore@` matcher skips fields with non-deterministic values (timestamps).
+- This pattern tests the full SQL Polling Consumer flow: DB insert → route polls and publishes to Kafka → route's `onConsume` updates the row.
 
 ---
 
@@ -1271,7 +1439,8 @@ env:
 
 - [ ] Make all demo data generators toggleable via config property
 - [ ] Check for `@PostConstruct` beans that connect to external services — add toggle property if needed (Spring Boot only, see Pattern 11)
-- [ ] Copy `EipTestSupport.java` into the test package
+- [ ] Add Camel management dependency if using `assertProcessedExchanges` (`camel-quarkus-management` / `camel-spring-boot-starter-management`)
+- [ ] Copy `EipTestSupport.java` into the test package (includes `assertProcessedExchanges`)
 - [ ] Create `config/EipInfraSetup.java` (use correct annotations per runtime)
 - [ ] Create `_infra/compose.yaml` with required services only
 - [ ] Create `_infra/postgres/init-schemas.sql` if PostgreSQL is needed
@@ -1279,7 +1448,8 @@ env:
 - [ ] Create test `application.properties` (disable generators, shutdown timeouts, broker connections)
 - [ ] Create `citrus-application.properties` (Quarkus only)
 - [ ] Write `EipTests.java` with one `@Nested` class per route/pattern
-- [ ] Add POM dependencies (check if REST/Pulsar extras are needed)
+- [ ] Refactor inline `otherwise()` / fallback branches into named `direct:` routes for testability
+- [ ] Add POM dependencies (check if REST/Pulsar/SQL extras are needed)
 - [ ] Add surefire/failsafe plugins to POM
 - [ ] Run `mvn verify` and confirm tests pass
 - [ ] Commit

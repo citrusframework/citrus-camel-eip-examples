@@ -1485,6 +1485,57 @@ public void shouldEnrichOrder() {
 
 This pattern applies whenever a `@Component`/`@Service` connects to infrastructure in `@PostConstruct`. The default property value stays `true` so production behavior is unchanged.
 
+### Deterministic test data for hash-based logic
+
+When production code uses `hashCode()`, modulo arithmetic, or other deterministic-but-opaque logic to branch behavior, avoid `citrus:randomNumber()` — the test outcome becomes unpredictable. Instead, use a **fixed test value** whose result you've verified offline.
+
+**Example**: `InventoryService` determines stock availability via `itemSku.hashCode() & 1` — odd hash means in stock. With a random id, the SKU `"SKU-SHIP-${id}"` produces an unpredictable hash, so `in_stock` could be `true` or `false`. Fix the id to a known value:
+
+```java
+// Compute offline: "SKU-SHIP-1001".hashCode() is odd → in_stock=true, available=50
+t.given(
+    createVariables()
+        .variable("id", 1001)        // fixed, not citrus:randomNumber(4)
+        .variable("amount", 300)
+);
+
+t.then(
+    receive()
+        .endpoint("kafka:eip.orders.inventory-checked?consumerGroup=citrus-inventory-group")
+        .message()
+        .body("""
+        {
+          "in_stock": true,
+          "available_quantity": 50,
+          "inventory_checked_at": "@ignore@"
+        }
+        """)
+);
+```
+
+Use `@ignore@` only for truly non-deterministic values (timestamps, UUIDs). If you can predict the value from the input, assert it — stronger tests catch more regressions.
+
+### SQL query validation inside repeatOnError for async writes
+
+When a route writes to a database asynchronously (e.g., Kafka → unmarshal → transacted → SQL INSERT), the row may not exist yet when the test's SQL query runs. Wrap the query in `repeatOnError` to poll until the write lands:
+
+```java
+t.then(
+    repeatOnError()
+        .until((i, context) -> i > 15)
+        .autoSleep(Duration.ofSeconds(1))
+        .actions(
+            sql(dataSource)
+                .query()
+                .statement("SELECT order_id, status FROM payments.payments WHERE order_id = '${id}'")
+                .validate("order_id", "${id}")
+                .validate("status", "PROCESSED")
+        )
+);
+```
+
+This differs from Pattern 12 (SQL Polling Consumer), where the test **inserts** data and the route polls it. Here the test **sends to Kafka** and the route inserts — so the test must poll the DB to confirm the write. The same pattern works for verifying outbox flags (`published = true`) after an outbox publisher route has run.
+
 ### Cross-route interference on shared topics
 
 When multiple routes consume from the same topic with different consumer groups (e.g., ContentBasedRouter and MessageFilter both read `eip.orders.placed`), test data for one route can trigger unintended behavior in the other.

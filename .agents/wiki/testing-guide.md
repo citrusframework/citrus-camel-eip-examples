@@ -671,6 +671,102 @@ spring.datasource.password=eip
 spring.datasource.driverClassName=org.postgresql.Driver
 ```
 
+### Extra Maven dependencies in YAML DSL tests
+
+Use a `# deps:` comment at the top of the `.citrus.it.yaml` file to declare additional Maven dependencies that aren't auto-resolved:
+
+```yaml
+# deps: org.postgresql:postgresql:42.7.5
+name: sql-polling-consumer-test
+description: Test verifying the SQL Polling Consumer pattern
+```
+
+This is needed when the test itself (not the route) requires a library — e.g., the PostgreSQL JDBC driver for `org.postgresql.ds.PGSimpleDataSource` used in a `configuration.beans` DataSource declaration.
+
+### YAML DSL SQL testing with bean definitions
+
+When a YAML DSL test needs a DataSource for `citrus-sql` actions, declare it as a YAML bean definition in the `configuration.beans` section:
+
+```yaml
+# deps: org.postgresql:postgresql:42.7.5
+name: sql-polling-consumer-test
+variables:
+  - name: order.id
+    value: "citrus:randomNumber(4)"
+  - name: order.amount
+    value: 40
+configuration:
+  beans:
+    - name: dataSource
+      type: org.postgresql.ds.PGSimpleDataSource
+      properties:
+        url: "jdbc:postgresql://localhost:5432/eip"
+        user: "eip"
+        password: "eip"
+actions:
+  # ... infrastructure setup, camel run ...
+
+  # Insert test data
+  - sql:
+      dataSource: "dataSource"
+      statements:
+        - statement: "INSERT INTO orders.orders (customer_id, item_sku, quantity, amount) VALUES ('CUST-00${order.id}', 'SKU-${order.id}', 1, ${order.amount})"
+
+  # Receive from Kafka and capture auto-generated DB id
+  - receive:
+      endpoint: >-
+        kafka:eip.orders.placed?server=${kafka.broker}&consumerGroup=citrus-placed-group
+      timeout: 60000
+      message:
+        body:
+          data: |
+            {
+              "id": "@variable(order.dbId)@",
+              "customer_id": "CUST-00${order.id}",
+              "status": "PLACED",
+              "amount": ${order.amount}.0,
+              "item_sku": "SKU-${order.id}",
+              "quantity": 1,
+              "created_at": "@ignore@"
+            }
+
+  # Verify DB state change using the captured id
+  - sql:
+      dataSource: "dataSource"
+      statements:
+        - statement: "SELECT status FROM orders.orders WHERE id = '${order.dbId}'"
+      validate:
+        - column: "status"
+          value: "PROCESSING"
+```
+
+Key differences from Java Pattern 12:
+- DataSource is declared via `configuration.beans` (not `@Inject`/`@Autowired`)
+- `sql.dataSource` references the bean by name (string `"dataSource"`)
+- Variable capture uses `@variable(order.dbId)@` with dotted names (not `order_id`)
+- SQL validation uses `validate` with `column`/`value` pairs (not `.validate("column", "value")`)
+
+### SQL URI with complex query parameters
+
+When a SQL component URI contains query parameters with special characters (e.g., `?onConsume=UPDATE ... WHERE id = :#id`), the YAML DSL parser in Camel 4.22.0 fails with `Error constructing YAML node id: org.apache.camel.model.FromDefinition`. Move complex parameters out of the URI into the `parameters` section:
+
+```yaml
+# WRONG — embedded query parameters cause YAML DSL parse error
+- route:
+    id: polling-consumer-sql
+    from:
+      uri: "sql:SELECT * FROM orders WHERE status = 'PLACED'?onConsume=UPDATE orders SET status = 'PROCESSING' WHERE id = :#id"
+
+# CORRECT — move onConsume to parameters
+- route:
+    id: polling-consumer-sql
+    from:
+      uri: "sql:SELECT * FROM orders WHERE status = 'PLACED'"
+      parameters:
+        delay: 30000
+        onConsume: "UPDATE orders SET status = 'PROCESSING' WHERE id = :#id"
+```
+
 ### YAML DSL route structure
 
 Steps must be nested under `from`, not at the same level:

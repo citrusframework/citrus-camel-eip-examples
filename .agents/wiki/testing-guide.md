@@ -1542,6 +1542,73 @@ When multiple routes consume from the same topic with different consumer groups 
 
 **Workaround**: Design test data to be inert for unrelated routes. For example, keep amounts below 100 in ContentBasedRouter tests to avoid triggering the MessageFilter (which filters `amount >= 100`).
 
+### `expectTimeout()` and test ordering across nested classes
+
+When tests across multiple `@Nested` classes write to shared Kafka topics, `expectTimeout()` can fail because a **new consumer group** with `auto.offset.reset=earliest` reads all existing messages — including those written by earlier test classes. For example, if `ChannelPurgerTest` writes to `eip.orders.accepted`, then `SelectiveConsumerTest.shouldRejectHazmatOrder` (which expects nothing on `eip.orders.accepted`) fails because the purger's messages are already on the topic.
+
+**Fix**: Use `@TestClassOrder(ClassOrderer.OrderAnnotation.class)` on the outer class and `@TestMethodOrder(MethodOrderer.OrderAnnotation.class)` on nested classes so that `expectTimeout()` tests run **before** any other test writes to the monitored topic:
+
+```java
+@TestClassOrder(ClassOrderer.OrderAnnotation.class)
+class EipTests {
+
+    @Nested @Order(1)
+    @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+    class SelectiveConsumerTest {
+        @Test @Order(1)
+        void shouldRejectHazmatOrder() { ... }  // expectTimeout on eip.orders.accepted — runs FIRST
+
+        @Test @Order(2)
+        void shouldForwardNonHazmatOrder() { ... }  // writes to eip.orders.accepted — runs AFTER
+    }
+
+    @Nested @Order(2)
+    @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+    class ChannelPurgerTest {
+        @Test @Order(1)
+        void shouldPurgeStaleMessage() { ... }  // expectTimeout on eip.orders.clean — runs FIRST
+
+        @Test @Order(2)
+        void shouldForwardRecentMessage() { ... }  // writes to eip.orders.clean — runs AFTER
+    }
+}
+```
+
+The rule: any `expectTimeout()` assertion must run before any test (in any class) writes to that topic.
+
+### Kafka headers as byte arrays with `camel().send()`
+
+When using `camel().send().endpoint(CamelEndpointBuilder)` to produce to a Kafka topic, header values are serialized by Kafka's `StringSerializer` into **byte arrays**. On the consumer side, `exchange.getIn().getHeader("myHeader")` returns a `byte[]`, not a `String`. Calling `Long.parseLong(header.toString())` fails with `NumberFormatException: [B@3a1c9d4f` because `byte[].toString()` returns the array identity, not the content.
+
+**Two complementary fixes** (apply both for defense in depth):
+
+1. **Test side** — send numeric headers as `String.valueOf()`:
+
+```java
+t.when(
+    camel().send()
+        .endpoint(CamelSupport.camel().endpoints()
+            .kafka("eip.orders.accepted").brokers("localhost:9092")::getRawUri)
+        .message()
+        .body(Resources.create("templates/order.json"))
+        .header("orderTimestamp", String.valueOf(System.currentTimeMillis()))
+);
+```
+
+2. **Route side** — handle `byte[]` when parsing the header:
+
+```java
+Object ts = exchange.getIn().getHeader("orderTimestamp");
+long orderTimestamp = 0;
+if (ts instanceof byte[]) {
+    orderTimestamp = Long.parseLong(new String((byte[]) ts));
+} else if (ts != null) {
+    orderTimestamp = Long.parseLong(ts.toString());
+}
+```
+
+This issue does NOT affect Citrus's native `send().endpoint("kafka:...")` (which goes through Citrus's own Kafka endpoint, not Camel's producer), but `camel().send()` with a `CamelEndpointBuilder` goes through the Camel Kafka producer, which uses Kafka's serializers.
+
 ---
 
 ## CI Workflow

@@ -1609,6 +1609,25 @@ if (ts instanceof byte[]) {
 
 This issue does NOT affect Citrus's native `send().endpoint("kafka:...")` (which goes through Citrus's own Kafka endpoint, not Camel's producer), but `camel().send()` with a `CamelEndpointBuilder` goes through the Camel Kafka producer, which uses Kafka's serializers.
 
+### REST DSL inlines `direct:` routes — no standalone consumer
+
+When a REST DSL definition uses `.to("direct:route-status")` and a separate `from("direct:route-status").routeId("control-bus-status")` exists in the same `RouteBuilder`, Camel merges them into a single REST route. The `direct:` consumer is **not** registered as a standalone endpoint:
+
+```java
+// In the same RouteBuilder.configure():
+rest("/control")
+    .get("/status/{routeId}")
+        .to("direct:route-status");       // REST DSL target
+
+from("direct:route-status")              // appears to be a standalone consumer...
+    .routeId("control-bus-status")
+    .toD("controlbus:route?routeId=${header.routeId}&action=status");
+```
+
+At runtime, the route log shows `control-bus-status (rest://get:/control:/status/{routeId})` — the `from("direct:route-status")` logic was inlined into the REST route. Sending to `direct:route-status` via `camel().send()` or `CamelEndpointBuilder` fails with `DirectConsumerNotAvailableException`.
+
+**Workaround**: Test REST-backed routes via HTTP instead of direct: endpoints, or skip the integration test if the route primarily wraps a well-tested Camel component (like ControlBus). For routes where you control the design, avoid the REST DSL → direct: → route pattern; use `rest().route()` inline or accept that direct: won't be independently addressable.
+
 ---
 
 ## CI Workflow

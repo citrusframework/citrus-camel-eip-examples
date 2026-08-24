@@ -1628,6 +1628,26 @@ At runtime, the route log shows `control-bus-status (rest://get:/control:/status
 
 **Workaround**: Test REST-backed routes via HTTP instead of direct: endpoints, or skip the integration test if the route primarily wraps a well-tested Camel component (like ControlBus). For routes where you control the design, avoid the REST DSL → direct: → route pattern; use `rest().route()` inline or accept that direct: won't be independently addressable.
 
+### `String.format("%.2f", ...)` produces locale-specific decimal separators
+
+Routes that build JSON strings via `String.format("%.2f", amount)` produce locale-sensitive output. On machines with a non-English locale (e.g., German), `29.99` becomes `29,99` — which is invalid JSON. Citrus body validation then fails with `Failed to parse JSON text`.
+
+**Fix**: always pass `Locale.US` as the first argument to `String.format` wherever a floating-point format specifier (`%f`, `%.2f`) appears in a JSON string:
+
+```java
+// BEFORE — breaks on non-English locale
+String enriched = String.format(
+    "{\"order_id\": %d, \"amount\": %.2f, ...}",
+    orderId, amount.doubleValue());
+
+// AFTER — always produces "." as decimal separator
+String enriched = String.format(java.util.Locale.US,
+    "{\"order_id\": %d, \"amount\": %.2f, ...}",
+    orderId, amount.doubleValue());
+```
+
+This bug surfaces in CI only on machines with a non-default locale but is worth fixing proactively — CI runners (Ubuntu) typically use `en_US.UTF-8` so tests pass there, but fail locally on developer machines with different locales. The symptom is a Citrus `Failed to parse JSON text` error even though the message was received and the route processed it correctly.
+
 ---
 
 ## CI Workflow

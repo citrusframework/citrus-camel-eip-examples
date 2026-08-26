@@ -24,14 +24,14 @@ Use this guide to create tests for new chapters across all three runtimes.
 
 Always test through the real entry point. If a route exposes a REST endpoint, use the Citrus HTTP client to call that endpoint — do NOT bypass it by sending to `direct:inbound-adapter`. Testing the real endpoint validates the full chain (REST → processing → messaging).
 
-### Disable demo data generators during tests
+### Disable timer-driven routes during tests
 
-Every `DemoDataGenerator` route must be toggleable via a config property. Tests produce their own data — background generators interfere with assertions.
+Every `timer:`-based route — whether a demo data generator or a scheduled business process — must be toggleable via a config property. Tests produce their own data and control timing. A background timer fires at unpredictable moments and can pollute exchange counts or compete for resources (e.g., a distributed lock route that fires during a test).
 
-- **Quarkus**: `@ConfigProperty(name = "eip.demo.data.generator.enabled", defaultValue = "true")` + `.autoStartup(enabled)`
-- **Spring Boot**: `@Value("${eip.demo.data.generator.enabled:true}")` + `.autoStartup(enabled)`
+- **Quarkus**: `@ConfigProperty(name = "eip.<route>.enabled", defaultValue = "true")` + `.autoStartup(enabled)`
+- **Spring Boot**: `@Value("${eip.<route>.enabled:true}")` + `.autoStartup(enabled)`
 
-Set `eip.demo.data.generator.enabled=false` in the test `application.properties`. Use a separate property per generator if the chapter has multiple generators (e.g., `eip.pulsar.demo.data.generator.enabled`, `eip.redis.demo.data.generator.enabled`).
+Set the property to `false` in the test `application.properties`. Use a specific name per route (e.g., `eip.distributed.lock.enabled`, `eip.demo.data.generator.enabled`).
 
 ### Shutdown timeouts
 
@@ -1376,6 +1376,64 @@ Key points:
 - The `@ignore@` matcher skips fields with non-deterministic values (timestamps).
 - This pattern tests the full SQL Polling Consumer flow: DB insert → route polls and publishes to Kafka → route's `onConsume` updates the row.
 
+### Pattern 13: Idempotent Receiver deduplication testing
+
+When testing a route that implements the Idempotent Receiver pattern (using Redis SET NX or a similar dedup store), verify both the happy path and the duplicate rejection path. The duplicate test must run **after** the new-event test because the dedup key must already be in the store.
+
+**Route side — route the duplicate branch to a named `direct:` route**:
+
+```java
+from("kafka:eip.orders.payments?brokers={{kafka.brokers}}&groupId=redis-idempotent")
+    .routeId("idempotent-receiver")
+    .unmarshal().json(Map.class)
+    .process(this::deduplicateAndProcess)
+    .choice()
+        .when(header("CamelDuplicate").isEqualTo(true))
+            .to("direct:handle-duplicate-payment")   // named route — testable via assertProcessedExchanges
+        .otherwise()
+            .marshal().json()
+            .to("kafka:eip.orders.payment-confirmed?brokers={{kafka.brokers}}")
+    .end();
+
+from("direct:handle-duplicate-payment")
+    .routeId("handle-duplicate-payment")
+    .log("Duplicate payment event ${body[event_id]} -- skipping");
+```
+
+**Test side — use ordered tests and `assertProcessedExchanges` on the named handler**:
+
+```java
+@Nested
+@Order(2)
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class IdempotentReceiverTest {
+
+    @Test
+    @Order(1)
+    public void shouldProcessNewPaymentEvent() {
+        // seeds the dedup key (EVT-2001) in Redis
+        t.when(send().endpoint("kafka:eip.orders.payments")
+            .message().body("{\"event_id\": \"EVT-2001\", ...}"));
+        t.then(repeatOnError()...receive()
+            .endpoint("kafka:eip.orders.payment-confirmed?consumerGroup=citrus-confirmed-group")...);
+    }
+
+    @Test
+    @Order(2)
+    public void shouldDropDuplicatePaymentEvent() {
+        // EVT-2001 is already in Redis from Order(1)
+        t.when(send().endpoint("kafka:eip.orders.payments")
+            .message().body("{\"event_id\": \"EVT-2001\", ...}"));
+        t.then(assertProcessedExchanges("handle-duplicate-payment", it -> it >= 1, camelContext));
+    }
+}
+```
+
+Key points:
+- `@TestMethodOrder(MethodOrderer.OrderAnnotation.class)` on the nested class ensures the new-event test seeds Redis before the duplicate test runs.
+- The duplicate handler route is verified via `assertProcessedExchanges`, not by checking the absence of a Kafka message (which would require `expectTimeout` with `auto.offset.reset` complications).
+- Use different `consumerGroup` values for each `receive()` to avoid cross-test interference.
+
 ---
 
 ## Testing Pitfalls
@@ -1690,7 +1748,7 @@ env:
 
 ### Per runtime (Quarkus / Spring Boot)
 
-- [ ] Make all demo data generators toggleable via config property
+- [ ] Make all `timer:`-based routes (demo generators and business schedulers) toggleable via config property
 - [ ] Check for `@PostConstruct` beans that connect to external services — add toggle property if needed (Spring Boot only, see Pattern 11)
 - [ ] Add Camel management dependency if using `assertProcessedExchanges` (`camel-quarkus-management` / `camel-spring-boot-starter-management`)
 - [ ] Copy `EipTestSupport.java` into the test package (includes `assertProcessedExchanges`)
@@ -1698,7 +1756,7 @@ env:
 - [ ] Create `_infra/compose.yaml` with required services only
 - [ ] Create `_infra/postgres/init-schemas.sql` if PostgreSQL is needed
 - [ ] Create `templates/order.json` with required fields
-- [ ] Create test `application.properties` (disable generators, shutdown timeouts, broker connections)
+- [ ] Create test `application.properties` (disable timer routes, shutdown timeouts, broker connections)
 - [ ] Create `citrus-application.properties` (Quarkus only)
 - [ ] Write `EipTests.java` with one `@Nested` class per route/pattern
 - [ ] Refactor inline `otherwise()` / fallback branches into named `direct:` routes for testability

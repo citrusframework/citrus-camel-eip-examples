@@ -1686,6 +1686,43 @@ At runtime, the route log shows `control-bus-status (rest://get:/control:/status
 
 **Workaround**: Test REST-backed routes via HTTP instead of direct: endpoints, or skip the integration test if the route primarily wraps a well-tested Camel component (like ControlBus). For routes where you control the design, avoid the REST DSL → direct: → route pattern; use `rest().route()` inline or accept that direct: won't be independently addressable.
 
+### Drools DRL consequences must call `update($o)` after modifying a fact
+
+When a Drools rule consequence modifies a field on a fact (e.g., `$o.setRoutingDecision("hazmat")`), Drools does **not** automatically re-evaluate other rules' conditions against the updated state unless `update($o)` is called. Without it, all rules whose conditions were satisfied at the time of agenda activation remain eligible to fire — including lower-salience rules that should have been excluded by the field change.
+
+**Symptom**: a higher-salience rule fires first and sets the expected field, but a lower-salience default rule then fires and overwrites it. Every fact ends up taking the default path.
+
+**Fix**: call `update($o)` immediately after every `set*` call in a DRL consequence:
+
+```drl
+rule "Route hazmat orders to hazmat handler"
+    salience 40
+when
+    $o: Order(containsHazmat == true, routingDecision == null)
+then
+    $o.setRoutingDecision("hazmat");
+    update($o);   // re-evaluates all conditions; prevents lower-salience rules from firing
+end
+```
+
+This is required in both the MVEL interpreter path (fallback when no executable model is pre-compiled) and with the canonical executable model.
+
+### Drools `KieSession` must be looked up by name when `kmodule.xml` declares named sessions
+
+`kieContainer.newKieSession()` (no argument) only succeeds when the `kmodule.xml` has a `<ksession>` element with no explicit name (i.e., the default session). If `kmodule.xml` declares named sessions like `<ksession name="orderSession"/>`, calling the no-arg form throws `Cannot find a default KieSession` at runtime — even though the application compiles cleanly.
+
+**Fix**: always use the session name from `kmodule.xml`:
+
+```java
+// BEFORE — throws RuntimeException: Cannot find a default KieSession
+KieSession session = kieContainer.newKieSession();
+
+// AFTER — explicit name matches kmodule.xml <ksession name="orderSession"/>
+KieSession session = kieContainer.newKieSession("orderSession");
+```
+
+---
+
 ### `String.format("%.2f", ...)` produces locale-specific decimal separators
 
 Routes that build JSON strings via `String.format("%.2f", amount)` produce locale-sensitive output. On machines with a non-English locale (e.g., German), `29.99` becomes `29,99` — which is invalid JSON. Citrus body validation then fails with `Failed to parse JSON text`.

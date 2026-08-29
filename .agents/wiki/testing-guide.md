@@ -1811,6 +1811,62 @@ When a Camel route has multiple exit paths to a Kafka topic (e.g. `eip.orders.sa
 
 ---
 
+### Disable OTel/tracing exporters in tests
+
+When a chapter uses OpenTelemetry (`camel-quarkus-opentelemetry` or `camel-opentelemetry-starter`), the route application tries to connect to the configured OTLP endpoint at startup. During tests there is no collector running, so the exporter will repeatedly fail to connect and flood the logs — or in stricter configurations cause startup failures.
+
+Disable the OTel SDK entirely in `src/test/resources/application.properties`:
+
+**Quarkus:**
+```properties
+# Disable OTel SDK — no collector is available during tests
+quarkus.otel.sdk.disabled=true
+```
+
+**Spring Boot:**
+```properties
+# Disable OTel exporter — no collector is available during tests
+otel.sdk.disabled=true
+management.otlp.tracing.export.enabled=false
+```
+
+The Camel OpenTelemetry integration stays on the classpath and exercises the instrumentation hooks — only the exporter is disabled. Traces are generated but silently dropped, so the route pipeline, span creation, and header propagation all execute normally.
+
+---
+
+### Variable-length JSON array responses — skip body validation or provide exact schema
+
+When a REST endpoint returns a JSON array whose length varies at runtime (e.g. a `/health/routes` endpoint that lists all running routes), using `@notEmpty()@` as the body matcher fails with `Failed to parse JSON text`. Citrus auto-detects `application/json` from the response Content-Type and routes the body through its JSON validator, which tries to parse `@notEmpty()@` as a JSON document.
+
+**Symptom**: `CitrusRuntimeException: Failed to parse JSON text` followed by `ParseException: Unexpected token @notEmpty()@`.
+
+**Options**:
+
+1. **Validate only the status and content type** (skip body matching entirely):
+```java
+t.then(
+    http()
+        .client("http://localhost:8081")
+        .receive()
+        .response(HttpStatus.OK)
+        .message()
+        .contentType("application/json")   // validates Content-Type header only
+);
+```
+
+2. **Provide a proper JSON body** using Citrus ignore markers for dynamic values:
+```java
+.body("""
+{
+  "order_id": "@notEmpty()@",
+  "status": "@notEmpty()@"
+}
+""")
+```
+This works for single-object responses. For variable-length arrays, option 1 is simpler and sufficient.
+
+---
+
 ## CI Workflow
 
 ### Matrix strategy

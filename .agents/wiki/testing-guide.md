@@ -1745,6 +1745,72 @@ This bug surfaces in CI only on machines with a non-default locale but is worth 
 
 ---
 
+### Flat single-module Quarkus projects require a dedicated CI job
+
+Most chapters follow a `examples/NN-name/quarkus/` layout where the CI matrix runs `examples/${{ matrix.example }}/quarkus`. A flat single-module project (like `25-quarkus-flow`, which has no `quarkus/` subdirectory) cannot be added to the matrix because the `run` step appends `/quarkus`. Instead add a standalone dedicated job that invokes the POM directly:
+
+```yaml
+quarkus-flow:
+  runs-on: ubuntu-latest
+  name: Quarkus — 25-quarkus-flow
+  steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 25
+      uses: actions/setup-java@v4
+      with:
+        java-version: '25'
+        distribution: 'temurin'
+        cache: 'maven'
+    - name: Run tests
+      run: |
+        mvn -B --no-transfer-progress verify -f examples/25-quarkus-flow
+```
+
+---
+
+### Verify saga branching arithmetic before writing tests
+
+Saga routes that branch on `orderId % N` conditions require choosing test `order_id` values carefully. A wrong `order_id` can silently route to the wrong branch, making the test fail or verify the wrong path.
+
+Always compute the modulo before picking an `order_id`:
+
+```java
+// OrderFulfillmentRoute.java uses: orderId % 7 == 0 → payment declined
+// For the happy path, pick order_id where orderId % 7 != 0 AND amount <= 5000
+// 1001 % 7 == 0  ← BAD, routes to payment failure
+// 1003 % 7 == 2  ← GOOD, routes to SHIPPED
+
+// Inventory failure: amount > 5000, any order_id not divisible by 7 on the outer path
+// Payment compensation: orderId % 7 == 0 AND amount <= 5000
+```
+
+The symptom of getting this wrong is that the test receives a message on `eip.orders.saga-failed` instead of `eip.orders.saga-completed`, or vice-versa — with no error in the route itself.
+
+---
+
+### Ensure all failure branches marshal before publishing to Kafka
+
+When a Camel route has multiple exit paths to a Kafka topic (e.g. `eip.orders.saga-failed`), every branch must call `.marshal().json()` before the `to("kafka:...")`. If one branch is missing the marshal step, the message body will be the Java `Map.toString()` output (`{key=value, ...}`), which is not valid JSON and will cause Citrus JSON validation to fail with `Failed to parse JSON text`.
+
+**Symptom**: one test path works (the one with `.marshal().json()`), the other times out retrying because the message on the topic is not valid JSON.
+
+**Fix**: ensure every `to("kafka:...")` in a failure/compensation branch is preceded by `.marshal().json()` when the body is a Map:
+
+```java
+// BEFORE — sends Map.toString() to Kafka (not valid JSON)
+.when(header("sagaState").isEqualTo("FAILED"))
+    .log("...")
+    .to("kafka:eip.orders.saga-failed?brokers={{kafka.brokers}}")
+
+// AFTER — consistent JSON output on all exit paths
+.when(header("sagaState").isEqualTo("FAILED"))
+    .log("...")
+    .marshal().json()
+    .to("kafka:eip.orders.saga-failed?brokers={{kafka.brokers}}")
+```
+
+---
+
 ## CI Workflow
 
 ### Matrix strategy

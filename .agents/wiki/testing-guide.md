@@ -905,6 +905,17 @@ pulsar:
     - eip-net
 ```
 
+When Pulsar is included, wait on the Pulsar admin health endpoint in `EipInfraSetup` (instead of kafka-ui):
+
+```java
+waitFor()
+    .http()
+    .url("http://localhost:8080/admin/v2/brokers/health")
+    .seconds(90)
+```
+
+The `seconds(90)` budget is generous because Pulsar standalone needs 30–60 seconds to initialise BookKeeper and load its own topics before it accepts client connections.
+
 ### PostgreSQL (when chapter uses SQL)
 
 ```yaml
@@ -1055,6 +1066,8 @@ t.when(
         .body(Resources.create("templates/order.json"))
 );
 ```
+
+**Note on producerName**: The `producerName` must be unique per test class to avoid producer-name conflicts when multiple tests share the same Pulsar topic.
 
 ### Pattern 5: Sending to Camel-internal endpoints (direct:, seda:)
 
@@ -1434,6 +1447,78 @@ Key points:
 - The duplicate handler route is verified via `assertProcessedExchanges`, not by checking the absence of a Kafka message (which would require `expectTimeout` with `auto.offset.reset` complications).
 - Use different `consumerGroup` values for each `receive()` to avoid cross-test interference.
 
+### Pattern 14: Circuit breaker fallback path testing
+
+The Managed Channel Adapter pattern wraps an external call in a Camel `circuitBreaker()`. When the inner call fails, Camel's `onFallback()` block activates immediately (regardless of circuit state) and routes to the dead-letter queue. To test this, send a message with an input value that triggers the simulated failure:
+
+```java
+// order_id=3 triggers simulated failure (id % 3 == 0 in the inventory check)
+t.given(
+    createVariables()
+        .variable("id", "3")
+        .variable("amount", 300)
+);
+
+t.when(
+    send()
+        .endpoint("kafka:eip.orders.processed")
+        .message()
+        .body(Resources.create("templates/order.json"))
+);
+
+t.then(
+    repeatOnError()
+        .until((i, context) -> i > 15)
+        .autoSleep(Duration.ofSeconds(1))
+        .actions(
+            receive()
+                .endpoint("kafka:eip.orders.dlq?consumerGroup=citrus-dlq-group")
+                .message()
+                .body("""
+                {
+                  "order_id": ${id},
+                  "customer_id": "CUST-003",
+                  ...
+                }
+                """)
+        )
+);
+```
+
+Use deterministic `order_id` values (not `citrus:randomNumber`) when the route behaviour depends on the value.
+
+### Pattern 15: Pulsar dead-letter topic flow testing
+
+Pulsar's dead-letter topic (DLT) support is configured on the consumer side via `maxRedeliverCount` and `deadLetterTopic` URI options. When an exception is thrown during message processing, Pulsar redelivers the message up to the configured limit and then forwards it to the DLT. To test the happy path (no DLT), send a message whose content does *not* trigger the simulated failure:
+
+```java
+// quantity=2 does NOT match the `"quantity": 1,` check — takes the success path
+t.when(
+    camel()
+        .send()
+        .endpoint(CamelSupport.camel().endpoints()
+                .pulsar("persistent://public/default/eip.orders.payments")
+                .serviceUrl("pulsar://localhost:6650")
+                .producerName("citrus-dlt-test")::getRawUri)
+        .message()
+        .body("{\"order_id\": 4002, \"quantity\": 2, \"amount\": 39.98}")
+);
+
+t.then(
+    assertProcessedExchanges("pulsar-dlt-consumer", it -> it >= 1, camelContext)
+);
+```
+
+The DLT monitor route (`pulsar-dlt-monitor`) subscribes to the dead-letter topic. In a test suite where the DLT is never triggered, the monitor route will have zero completed exchanges. Assert with `it -> it >= 0` to confirm the route started and is healthy without requiring DLT traffic:
+
+```java
+t.then(
+    assertProcessedExchanges("pulsar-dlt-monitor", it -> it >= 0, camelContext)
+);
+```
+
+For routes that consume from Pulsar and forward to an internal `direct:` processor, the assertion target should be the `direct:` route, not the Pulsar consumer route, because the processor route is what transforms the data.
+
 ---
 
 ## Testing Pitfalls
@@ -1596,9 +1681,13 @@ This differs from Pattern 12 (SQL Polling Consumer), where the test **inserts** 
 
 ### Cross-route interference on shared topics
 
-When multiple routes consume from the same topic with different consumer groups (e.g., ContentBasedRouter and MessageFilter both read `eip.orders.placed`), test data for one route can trigger unintended behavior in the other.
+When multiple routes consume from the same topic with different consumer groups (e.g., ContentBasedRouter and MessageFilter both read `eip.orders.placed`), test data for one route can trigger unintended behavior in the other. A Kafka topic consumed by several route consumer groups delivers one copy of every message to each group independently. When a Citrus test sends one message to that topic, *all* active consumer groups receive it and their routes run. This produces side-effect messages on output topics that the current test does not intend to verify.
+
+The consequence: a test that sends a real order to `eip.orders.placed` and then reads from `eip.orders.processed` may pick up a message placed there by a *previous* test's route processing the same topic — not the message this test sent. Use a distinct consumer group on the `receive()` action to ensure you are reading a fresh offset, and use a unique message key so you can correlate which message arrived.
 
 **Workaround**: Design test data to be inert for unrelated routes. For example, keep amounts below 100 in ContentBasedRouter tests to avoid triggering the MessageFilter (which filters `amount >= 100`).
+
+If side-effect messages accumulate between tests, consider using `expectTimeout` to confirm a message does *not* appear on unintended output topics, or add test ordering (`@TestClassOrder`) so that tests consuming the same topics run sequentially rather than potentially interleaving.
 
 ### `expectTimeout()` and test ordering across nested classes
 
@@ -1864,6 +1953,40 @@ t.then(
 """)
 ```
 This works for single-object responses. For variable-length arrays, option 1 is simpler and sufficient.
+
+---
+
+### `onFallback()` is not the same as circuit-open
+
+Camel's `circuitBreaker().onFallback()` activates on *any* exception thrown by the guarded block — even the very first call. It is an immediate local fallback, not a gate that only opens after a threshold of failures. The circuit opens (and stays open for a configured time) independently; `onFallback()` fires regardless. This means a DLQ test that sends one known-bad message will always trigger the fallback path, which is what you want. What it cannot test is the recovery behaviour once the circuit returns to half-open state — that requires multiple calls over time.
+
+### DLQ body contains only pre-failure fields
+
+When `onFallback()` routes to a dead-letter topic, the message body is the state it had *before* the failed call ran. Any fields that the guarded route would have added (inventory status, warehouse location, enrichment flags) are absent. If your expected DLQ body includes those fields, the JSON match will fail with a confusing "missing field" error. Only assert the fields that were present in the original input:
+
+```java
+// Wrong — inventory_status was never set because the call failed
+.body("""
+{
+  "order_id": ${id},
+  "inventory_status": "IN_STOCK"   // ← not present in DLQ message
+}
+""")
+
+// Correct — match only the original input fields
+.body("""
+{
+  "order_id": ${id},
+  "customer_id": "CUST-00${id}",
+  "quantity": 1,
+  "amount": ${amount}
+}
+""")
+```
+
+### Asserting exchange counts is fragile across test reruns
+
+`assertProcessedExchanges` reads the JMX counter for a route, which accumulates across all tests in the suite. Checking `it -> it == 1` will fail on the second run if the test suite is retried without a JVM restart. Always use `it -> it >= 1` (or a range) rather than exact counts unless you can guarantee a clean slate.
 
 ---
 

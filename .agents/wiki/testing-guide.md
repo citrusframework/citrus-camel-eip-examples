@@ -1519,6 +1519,41 @@ t.then(
 
 For routes that consume from Pulsar and forward to an internal `direct:` processor, the assertion target should be the `direct:` route, not the Pulsar consumer route, because the processor route is what transforms the data.
 
+### Pattern 16: Wire-tap with fork + parallel receive
+
+When a route uses `wireTap()` to send an async copy to a side channel (e.g., an audit topic), both the main output and the wire-tapped output arrive on separate Kafka topics nearly simultaneously. Use `fork(true)` on the send so the test proceeds immediately, then `parallel()` to receive from both topics concurrently. This avoids the timing issue where a sequential receive on the first topic delays subscription to the second topic, causing the wire-tapped message to be missed (see [Kafka auto.offset.reset pitfall](#kafka-autooffsetresetlatest-on-intermediate-topics)).
+
+```java
+t.when(
+    send()
+        .endpoint("kafka:eip.orders.processing")
+        .message()
+        .fork(true)
+        .body(Resources.create("templates/order.json"))
+        .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
+);
+
+t.then(
+    parallel()
+        .actions(
+            receive()
+                .endpoint("kafka:eip.orders.processed?consumerGroup=citrus-wiretap-processed-group")
+                .message()
+                .body(Resources.create("templates/processed-order.json")),
+            receive()
+                .endpoint("kafka:eip.orders.audit?consumerGroup=citrus-wiretap-audit-group")
+                .message()
+                .body(Resources.create("templates/audit-order.json"))
+        )
+);
+```
+
+Key points:
+- `fork(true)` on the send is essential — without it, the send blocks until the Kafka producer acknowledgement completes, delaying the parallel receive subscriptions.
+- `parallel()` subscribes to both topics at the same time, so neither consumer misses messages that arrive while the other is being set up.
+- Each receive uses a distinct `consumerGroup` to avoid interference.
+- No `repeatOnError` or `KafkaMessageFilter` needed — the parallel subscriptions are established before the route finishes processing.
+
 ---
 
 ## Testing Pitfalls
@@ -1987,6 +2022,62 @@ When `onFallback()` routes to a dead-letter topic, the message body is the state
 ### Asserting exchange counts is fragile across test reruns
 
 `assertProcessedExchanges` reads the JMX counter for a route, which accumulates across all tests in the suite. Checking `it -> it == 1` will fail on the second run if the test suite is retried without a JVM restart. Always use `it -> it >= 1` (or a range) rather than exact counts unless you can guarantee a clean slate.
+
+### Sleep + controlBus status check is an anti-pattern
+
+A test that sends a message, sleeps for N seconds, and then checks that the route is still in `Started` state proves almost nothing — the route could have silently dropped the message, thrown an exception, or never received it, and it would still be `Started`. This pattern is a false-positive trap:
+
+```java
+// ANTI-PATTERN — proves nothing about message processing
+t.then(sleep().seconds(5));
+t.then(
+    camel().camelContext(camelContext)
+        .controlBus()
+        .route("my-route")
+        .status()
+        .result(ServiceStatus.Started)
+);
+```
+
+**Replace with one of:**
+- `assertProcessedExchanges("my-route", it -> it >= 1, camelContext)` — when the route has no output topic (log-only, `direct:` handler). See [Pattern 8](#pattern-8-verify-exchange-processing-via-managedroutembean).
+- `receive().endpoint("kafka:output.topic")` — when the route produces to a verifiable endpoint. Validates both processing AND output content.
+- `parallel()` with multiple `receive()` actions — when the route produces to multiple topics (e.g., wire-tap). See [Pattern 16](#pattern-16-wire-tap-with-fork--parallel-receive).
+
+### Wire-tap body mutation through shared Map reference
+
+Camel's `wireTap()` creates a shallow copy of the exchange. When the body is a `java.util.Map` (common after `unmarshal().json()`), both the main route and the wire-tapped route share the **same Map instance**. If the main route modifies the Map (e.g., `body.put("status", "PROCESSED")`), those mutations are visible in the wire-tap copy because Java Maps are reference types.
+
+**Symptom**: the audit/wire-tap output template validates against 9 fields, but the actual message has 11 — the extra fields (`status`, `processed_at`) were added by the main route after the wire-tap point.
+
+**Fix the test template**, not the route — include the leaked fields with `@ignore@` for non-deterministic values:
+
+```json
+{
+  "order_id": "${id}",
+  "customer_id": "CUST-00${id}",
+  "status": "PROCESSED",
+  "processed_at": "@ignore@",
+  "audit_timestamp": "@ignore@",
+  "audit_source": "wire-tap"
+}
+```
+
+If the route needs a clean copy (no leaked fields), the route itself should deep-copy the body *before* the wire-tap fires — but that's a route design decision, not a test fix.
+
+### `KafkaMessageHeaders.MESSAGE_KEY` does not work with `KafkaMessageFilter`
+
+`KafkaMessageHeaders.MESSAGE_KEY` (`citrus_kafka_messageKey`) is a Citrus pseudo-header that represents the Kafka record key. It is **not** a real Kafka header — the record key is a separate attribute of the Kafka `ConsumerRecord`, not part of the headers map. `KafkaMessageFilter.kafkaHeaderEquals()` searches actual Kafka headers, so filtering by `citrus_kafka_messageKey` will never match:
+
+```java
+// WRONG — citrus_kafka_messageKey is not a real Kafka header
+.kafkaMessageSelector(kafkaHeaderEquals(KafkaMessageHeaders.MESSAGE_KEY, "${id}"))
+
+// CORRECT — use a real Kafka header set by the producer
+.kafkaMessageSelector(kafkaHeaderEquals("order-id", "${id}"))
+```
+
+**Workaround**: add a custom header (e.g., `order-id`) to the send action and filter on that. Or avoid `KafkaMessageFilter` entirely by using `fork(true)` + `parallel()` receive (see [Pattern 16](#pattern-16-wire-tap-with-fork--parallel-receive)), which eliminates the timing issue that makes the filter necessary in the first place.
 
 ---
 

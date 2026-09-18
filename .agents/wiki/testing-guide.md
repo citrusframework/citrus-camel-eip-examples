@@ -142,8 +142,37 @@ public interface EipTestSupport extends TestActionSupport {
                     sleep().seconds(5)
                 );
     }
+
+    default TestActionBuilder<?> resetRouteStatistics(CamelContext camelContext, String... routeIds) {
+        return sequential()
+                .actions(Arrays.stream(routeIds)
+                        .map(routeId -> resetRouteStatistics(routeId, camelContext))
+                        .collect(Collectors.toSet())
+                        .toArray(TestActionBuilder[]::new));
+    }
+
+    default TestActionBuilder<?> resetRouteStatistics(String routeId, CamelContext camelContext) {
+        return () -> (context) -> {
+            ManagedCamelContext managedContext = camelContext.getCamelContextExtension()
+                    .getContextPlugin(ManagedCamelContext.class);
+            ManagedRouteMBean routeMBean = managedContext.getManagedRoute(routeId);
+            if (routeMBean != null) {
+                try {
+                    routeMBean.reset(true);
+                } catch (Exception e) {
+                    throw new CitrusRuntimeException(
+                            String.format("Failed to reset route statistics for routeId '%s'", routeId), e);
+                }
+            } else {
+                throw new CitrusRuntimeException(
+                        String.format("Failed to get managed route statistics for routeId '%s'", routeId));
+            }
+        };
+    }
 }
 ```
+
+The `resetRouteStatistics` helper zeroes out MBean exchange counters for the given routes, enabling exact-count assertions instead of fragile `it -> it >= 1` predicates. Call it in the `given` phase after `waitForCamelRouteStarted` and before sending any test data. Pass all route IDs that the test will assert on — including routes the test message does NOT traverse, so their counters start clean.
 
 ---
 
@@ -1192,21 +1221,30 @@ default TestActionBuilder<?> assertProcessedExchanges(String routeId, Predicate<
 }
 ```
 
-**Usage — exact count**:
+**Usage — reset statistics + exact count** (preferred):
+
+Reset MBean counters before each test, then assert exact counts. This is the strongest form — it catches both missing and spurious exchanges:
 
 ```java
+t.given(waitForCamelRouteStarted("order-routing-slip", camelContext));
+t.given(resetRouteStatistics(camelContext,
+        "order-routing-slip", "validate-order", "assign-carrier",
+        "hazmat-compliance", "customs-classification"));
+
 t.when(
     send()
-        .endpoint("kafka:eip.consumer.events")
+        .endpoint("kafka:eip.orders.placed")
         .message()
         .body(Resources.create("templates/order.json"))
         .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
 );
 
-t.then(
-    assertProcessedExchanges("event-driven-consumer", 1, camelContext)
-);
+t.then(assertProcessedExchanges("order-routing-slip", 1, camelContext));
+t.then(assertProcessedExchanges("validate-order", 1, camelContext));
+t.then(assertProcessedExchanges("assign-carrier", 1, camelContext));
 ```
+
+Reset all routes involved in the test — including routes the message should NOT traverse. A route that should not fire stays at 0 after the reset, so an exact-count assertion of `1` on only the expected routes implicitly proves the others were not triggered.
 
 **Usage — predicate** (e.g., timer-based routes where count is non-deterministic):
 
@@ -1219,7 +1257,8 @@ t.then(
 **Usage — verify dispatched branch**:
 
 ```java
-// Send to dispatcher route, verify the specific handler route processed it
+t.given(resetRouteStatistics(camelContext, "handle-order-placed", "handle-order-shipped"));
+
 t.when(
     send()
         .endpoint("kafka:eip.consumer.dispatch")
@@ -1227,9 +1266,7 @@ t.when(
         .body(Resources.create("templates/order.json"))
 );
 
-t.then(
-    assertProcessedExchanges("handle-order-placed", 1, camelContext)
-);
+t.then(assertProcessedExchanges("handle-order-placed", 1, camelContext));
 ```
 
 This is strictly better than the old sleep+controlBus approach: it verifies the exchange was **completed without errors**, not just that the route is still in `Started` state.
@@ -2019,9 +2056,26 @@ When `onFallback()` routes to a dead-letter topic, the message body is the state
 """)
 ```
 
-### Asserting exchange counts is fragile across test reruns
+### Asserting exchange counts is fragile without resetting statistics
 
-`assertProcessedExchanges` reads the JMX counter for a route, which accumulates across all tests in the suite. Checking `it -> it == 1` will fail on the second run if the test suite is retried without a JVM restart. Always use `it -> it >= 1` (or a range) rather than exact counts unless you can guarantee a clean slate.
+`assertProcessedExchanges` reads the JMX counter for a route, which accumulates across all tests in the suite. Without a reset, checking `it -> it == 1` fails on the second test because the counter already holds the count from the first test.
+
+**Preferred fix**: call `resetRouteStatistics(camelContext, ...)` in the `given` phase before each test. This zeroes the MBean counters, making exact-count assertions (`assertProcessedExchanges("route", 1, camelContext)`) safe and precise. Reset all routes the test touches — including routes the message should NOT traverse — so you can assert both positive and negative routing outcomes.
+
+```java
+t.given(waitForCamelRouteStarted("order-routing-slip", camelContext));
+t.given(resetRouteStatistics(camelContext,
+        "order-routing-slip", "validate-order", "assign-carrier",
+        "hazmat-compliance", "customs-classification"));
+
+// ... send test data ...
+
+// Exact counts are now safe — counters were zeroed above
+t.then(assertProcessedExchanges("validate-order", 1, camelContext));
+t.then(assertProcessedExchanges("assign-carrier", 1, camelContext));
+```
+
+**Fallback**: if you cannot reset statistics (e.g., you need cumulative counts across ordered tests), use `it -> it >= 1` predicates instead of exact counts.
 
 ### Sleep + controlBus status check is an anti-pattern
 

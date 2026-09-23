@@ -166,9 +166,7 @@ class EipTests implements EipTestSupport {
                     .header(KafkaMessageHeaders.MESSAGE_KEY, "SB-PAY-2001-DUP")
             );
 
-            t.then(
-                assertProcessedExchanges("handle-duplicate-payment", it -> it >= 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("handle-duplicate-payment", 1, camelContext));
         }
     }
 }

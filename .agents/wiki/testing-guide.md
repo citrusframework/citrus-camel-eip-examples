@@ -64,7 +64,7 @@ Only include fields the route actually uses. Simpler templates are better — ch
 
 ### Design routes for testability
 
-**Route all branches to named routes** — when a `choice()` route has an `otherwise()` branch that only logs, replace the inline `.log(...)` with a `direct:` route that has its own `routeId`. This makes the fallback branch verifiable via `assertProcessedExchanges()`:
+**Route all branches to named routes** — when a `choice()` route has an `otherwise()` branch that only logs, replace the inline `.log(...)` with a `direct:` route that has its own `routeId`. This makes the fallback branch verifiable via `verifyCompletedExchanges()`:
 
 ```java
 // BEFORE — otherwise() just logs, not verifiable via exchange counts
@@ -83,7 +83,7 @@ from("direct:handle-order_unknown")
 The test can then verify the fallback branch was exercised:
 
 ```java
-t.then(assertProcessedExchanges("handle-order-unknown", 1, camelContext));
+t.then(verifyCompletedExchanges("handle-order-unknown", 1, camelContext));
 ```
 
 This principle applies to any inline processing that should be testable: extract it into a named `direct:` route so the exchange shows up in route-level MBean statistics.
@@ -123,7 +123,7 @@ Every Kafka receive action must use a unique `consumerGroup` to avoid conflicts 
 
 ### EipTestSupport interface
 
-Shared across all Java-based tests (Quarkus and Spring Boot). Provides `waitForCamelRouteStarted()` using the ControlBus. Copy this interface into each test package — it is identical across chapters and runtimes:
+Shared across all Java-based tests (Quarkus and Spring Boot). Provides `waitForCamelRouteStarted()`, `verifyCompletedExchanges()`, `verifyRouteStats()`, and `resetRouteStats()`. Copy this interface into each test package — it is identical across chapters and runtimes:
 
 ```java
 public interface EipTestSupport extends TestActionSupport {
@@ -143,15 +143,41 @@ public interface EipTestSupport extends TestActionSupport {
                 );
     }
 
-    default TestActionBuilder<?> resetRouteStatistics(CamelContext camelContext, String... routeIds) {
+    default TestActionBuilder<?> verifyCompletedExchanges(String routeId, long count, CamelContext camelContext) {
+        return repeatOnError()
+                .until((i, context) -> i > 20)
+                .autoSleep(Duration.ofSeconds(1))
+                .actions(
+                    camel()
+                        .camelContext(camelContext)
+                        .route()
+                        .verifyRouteStats(routeId)
+                        .completed(count)
+                );
+    }
+
+    default TestActionBuilder<?> verifyRouteStats(String routeId, String stats, CamelContext camelContext) {
+        return repeatOnError()
+                .until((i, context) -> i > 20)
+                .autoSleep(Duration.ofSeconds(1))
+                .actions(
+                    camel()
+                        .camelContext(camelContext)
+                        .route()
+                        .verifyRouteStats(routeId)
+                        .stats(stats)
+                );
+    }
+
+    default TestActionBuilder<?> resetRouteStats(CamelContext camelContext, String... routeIds) {
         return sequential()
                 .actions(Arrays.stream(routeIds)
-                        .map(routeId -> resetRouteStatistics(routeId, camelContext))
+                        .map(routeId -> resetRouteStats(routeId, camelContext))
                         .collect(Collectors.toSet())
                         .toArray(TestActionBuilder[]::new));
     }
 
-    default TestActionBuilder<?> resetRouteStatistics(String routeId, CamelContext camelContext) {
+    default TestActionBuilder<?> resetRouteStats(String routeId, CamelContext camelContext) {
         return () -> (context) -> {
             ManagedCamelContext managedContext = camelContext.getCamelContextExtension()
                     .getContextPlugin(ManagedCamelContext.class);
@@ -172,7 +198,9 @@ public interface EipTestSupport extends TestActionSupport {
 }
 ```
 
-The `resetRouteStatistics` helper zeroes out MBean exchange counters for the given routes, enabling exact-count assertions instead of fragile `it -> it >= 1` predicates. Call it in the `given` phase after `waitForCamelRouteStarted` and before sending any test data. Pass all route IDs that the test will assert on — including routes the test message does NOT traverse, so their counters start clean.
+- **`verifyCompletedExchanges`** uses Citrus's built-in `camel().route().verifyRouteStats().completed()` API to assert the exact number of completed exchanges on a route.
+- **`verifyRouteStats`** uses `.stats()` for flexible stat expressions (e.g., `"exchangesCompleted >= 1"` for non-deterministic routes like timers).
+- **`resetRouteStats`** zeroes out MBean exchange counters for the given routes, enabling exact-count assertions. Call it in the `given` phase after `waitForCamelRouteStarted` and before sending any test data. Pass all route IDs that the test will assert on — including routes the test message does NOT traverse, so their counters start clean.
 
 ---
 
@@ -235,7 +263,7 @@ Test dependencies (always the same 6 core + extras as needed):
 <!-- Add when testing SQL/database routes -->
 <dependency><groupId>org.citrusframework</groupId><artifactId>citrus-sql</artifactId><version>${citrus.version}</version><scope>test</scope></dependency>
 
-<!-- Add when using assertProcessedExchanges (ManagedRouteMBean) -->
+<!-- Add when using verifyCompletedExchanges / verifyRouteStats (route statistics) -->
 <!-- Quarkus: -->
 <dependency><groupId>org.apache.camel.quarkus</groupId><artifactId>camel-quarkus-management</artifactId></dependency>
 <!-- Spring Boot: use camel-spring-boot-starter-management instead -->
@@ -1170,56 +1198,15 @@ t.when(
 redisTemplate.convertAndSend("eip.orders.notifications", ...);
 ```
 
-### Pattern 8: Verify exchange processing via ManagedRouteMBean
+### Pattern 8: Verify exchange processing via route statistics
 
-When a route has no output topic to receive from (log-only, `direct:` handler, etc.), verify that the route actually **processed** the exchange — not just that it's still running. Use Camel's `ManagedCamelContext` to query the route's MBean for completed/failed exchange counts.
+When a route has no output topic to receive from (log-only, `direct:` handler, etc.), verify that the route actually **processed** the exchange — not just that it's still running. Use Citrus's built-in `camel().route().verifyRouteStats()` API to check completed exchange counts.
 
-**Requires** Camel management to be on the classpath so that `ManagedCamelContext` and `ManagedRouteMBean` are available. Add the runtime-appropriate dependency:
+**Requires** Camel management to be on the classpath. Add the runtime-appropriate dependency:
 - **Quarkus**: `camel-quarkus-management`
 - **Spring Boot**: `camel-spring-boot-starter-management` (or `camel-management` for standalone Camel Main)
 
-**EipTestSupport helper** (add to the shared interface):
-
-```java
-import java.util.function.Predicate;
-import org.apache.camel.api.management.ManagedCamelContext;
-import org.apache.camel.api.management.mbean.ManagedRouteMBean;
-import org.citrusframework.exceptions.CitrusRuntimeException;
-import org.citrusframework.exceptions.ValidationException;
-
-default TestActionBuilder<?> assertProcessedExchanges(String routeId, long expected, CamelContext camelContext) {
-    return assertProcessedExchanges(routeId, it -> it == expected, camelContext);
-}
-
-default TestActionBuilder<?> assertProcessedExchanges(String routeId, Predicate<Long> check, CamelContext camelContext) {
-    return repeatOnError()
-            .until((i, context) -> i > 20)
-            .autoSleep(Duration.ofSeconds(1))
-            .actions(
-                context -> {
-                    ManagedCamelContext managedContext = camelContext.getCamelContextExtension()
-                            .getContextPlugin(ManagedCamelContext.class);
-                    ManagedRouteMBean routeMBean = managedContext.getManagedRoute(routeId);
-
-                    if (routeMBean != null) {
-                        long failed = routeMBean.getExchangesFailed();
-                        if (failed > 0) {
-                            throw new ValidationException("Route '%s' has %d failed exchanges"
-                                    .formatted(routeId, failed));
-                        }
-                        long completed = routeMBean.getExchangesCompleted();
-                        if (!check.test(completed)) {
-                            throw new ValidationException("Route '%s' has %d completed exchanges"
-                                    .formatted(routeId, completed));
-                        }
-                    } else {
-                        throw new CitrusRuntimeException("No managed route for routeId '%s'"
-                                .formatted(routeId));
-                    }
-                }
-            );
-}
-```
+The helpers `verifyCompletedExchanges` and `verifyRouteStats` are defined in the [EipTestSupport interface](#eiptestsupport-interface).
 
 **Usage — reset statistics + exact count** (preferred):
 
@@ -1227,7 +1214,7 @@ Reset MBean counters before each test, then assert exact counts. This is the str
 
 ```java
 t.given(waitForCamelRouteStarted("order-routing-slip", camelContext));
-t.given(resetRouteStatistics(camelContext,
+t.given(resetRouteStats(camelContext,
         "order-routing-slip", "validate-order", "assign-carrier",
         "hazmat-compliance", "customs-classification"));
 
@@ -1239,25 +1226,25 @@ t.when(
         .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
 );
 
-t.then(assertProcessedExchanges("order-routing-slip", 1, camelContext));
-t.then(assertProcessedExchanges("validate-order", 1, camelContext));
-t.then(assertProcessedExchanges("assign-carrier", 1, camelContext));
+t.then(verifyCompletedExchanges("order-routing-slip", 1, camelContext));
+t.then(verifyCompletedExchanges("validate-order", 1, camelContext));
+t.then(verifyCompletedExchanges("assign-carrier", 1, camelContext));
 ```
 
 Reset all routes involved in the test — including routes the message should NOT traverse. A route that should not fire stays at 0 after the reset, so an exact-count assertion of `1` on only the expected routes implicitly proves the others were not triggered.
 
-**Usage — predicate** (e.g., timer-based routes where count is non-deterministic):
+**Usage — stats expression** (e.g., timer-based routes where count is non-deterministic):
 
 ```java
 t.then(
-    assertProcessedExchanges("polling-consumer", it -> it > 1, camelContext)
+    verifyRouteStats("polling-consumer", "exchangesCompleted > 1", camelContext)
 );
 ```
 
 **Usage — verify dispatched branch**:
 
 ```java
-t.given(resetRouteStatistics(camelContext, "handle-order-placed", "handle-order-shipped"));
+t.given(resetRouteStats(camelContext, "handle-order-placed", "handle-order-shipped"));
 
 t.when(
     send()
@@ -1266,7 +1253,7 @@ t.when(
         .body(Resources.create("templates/order.json"))
 );
 
-t.then(assertProcessedExchanges("handle-order-placed", 1, camelContext));
+t.then(verifyCompletedExchanges("handle-order-placed", 1, camelContext));
 ```
 
 This is strictly better than the old sleep+controlBus approach: it verifies the exchange was **completed without errors**, not just that the route is still in `Started` state.
@@ -1439,7 +1426,7 @@ from("kafka:eip.orders.payments?brokers={{kafka.brokers}}&groupId=redis-idempote
     .process(this::deduplicateAndProcess)
     .choice()
         .when(header("CamelDuplicate").isEqualTo(true))
-            .to("direct:handle-duplicate-payment")   // named route — testable via assertProcessedExchanges
+            .to("direct:handle-duplicate-payment")   // named route — testable via verifyCompletedExchanges
         .otherwise()
             .marshal().json()
             .to("kafka:eip.orders.payment-confirmed?brokers={{kafka.brokers}}")
@@ -1450,7 +1437,7 @@ from("direct:handle-duplicate-payment")
     .log("Duplicate payment event ${body[event_id]} -- skipping");
 ```
 
-**Test side — use ordered tests and `assertProcessedExchanges` on the named handler**:
+**Test side — use ordered tests and `verifyCompletedExchanges` on the named handler**:
 
 ```java
 @Nested
@@ -1474,14 +1461,14 @@ class IdempotentReceiverTest {
         // EVT-2001 is already in Redis from Order(1)
         t.when(send().endpoint("kafka:eip.orders.payments")
             .message().body("{\"event_id\": \"EVT-2001\", ...}"));
-        t.then(assertProcessedExchanges("handle-duplicate-payment", it -> it >= 1, camelContext));
+        t.then(verifyRouteStats("handle-duplicate-payment", "exchangesCompleted >= 1", camelContext));
     }
 }
 ```
 
 Key points:
 - `@TestMethodOrder(MethodOrderer.OrderAnnotation.class)` on the nested class ensures the new-event test seeds Redis before the duplicate test runs.
-- The duplicate handler route is verified via `assertProcessedExchanges`, not by checking the absence of a Kafka message (which would require `expectTimeout` with `auto.offset.reset` complications).
+- The duplicate handler route is verified via `verifyRouteStats`, not by checking the absence of a Kafka message (which would require `expectTimeout` with `auto.offset.reset` complications).
 - Use different `consumerGroup` values for each `receive()` to avoid cross-test interference.
 
 ### Pattern 14: Circuit breaker fallback path testing
@@ -1542,7 +1529,7 @@ t.when(
 );
 
 t.then(
-    assertProcessedExchanges("pulsar-dlt-consumer", it -> it >= 1, camelContext)
+    verifyRouteStats("pulsar-dlt-consumer", "exchangesCompleted >= 1", camelContext)
 );
 ```
 
@@ -1550,7 +1537,7 @@ The DLT monitor route (`pulsar-dlt-monitor`) subscribes to the dead-letter topic
 
 ```java
 t.then(
-    assertProcessedExchanges("pulsar-dlt-monitor", it -> it >= 0, camelContext)
+    verifyRouteStats("pulsar-dlt-monitor", "exchangesCompleted >= 0", camelContext)
 );
 ```
 
@@ -2056,26 +2043,26 @@ When `onFallback()` routes to a dead-letter topic, the message body is the state
 """)
 ```
 
-### Asserting exchange counts is fragile without resetting statistics
+### Exchange count assertions are fragile without resetting statistics
 
-`assertProcessedExchanges` reads the JMX counter for a route, which accumulates across all tests in the suite. Without a reset, checking `it -> it == 1` fails on the second test because the counter already holds the count from the first test.
+`verifyCompletedExchanges` reads the route statistics counter, which accumulates across all tests in the suite. Without a reset, checking for exactly 1 completed exchange fails on the second test because the counter already holds the count from the first test.
 
-**Preferred fix**: call `resetRouteStatistics(camelContext, ...)` in the `given` phase before each test. This zeroes the MBean counters, making exact-count assertions (`assertProcessedExchanges("route", 1, camelContext)`) safe and precise. Reset all routes the test touches — including routes the message should NOT traverse — so you can assert both positive and negative routing outcomes.
+**Preferred fix**: call `resetRouteStats(camelContext, ...)` in the `given` phase before each test. This zeroes the MBean counters, making exact-count assertions (`verifyCompletedExchanges("route", 1, camelContext)`) safe and precise. Reset all routes the test touches — including routes the message should NOT traverse — so you can assert both positive and negative routing outcomes.
 
 ```java
 t.given(waitForCamelRouteStarted("order-routing-slip", camelContext));
-t.given(resetRouteStatistics(camelContext,
+t.given(resetRouteStats(camelContext,
         "order-routing-slip", "validate-order", "assign-carrier",
         "hazmat-compliance", "customs-classification"));
 
 // ... send test data ...
 
 // Exact counts are now safe — counters were zeroed above
-t.then(assertProcessedExchanges("validate-order", 1, camelContext));
-t.then(assertProcessedExchanges("assign-carrier", 1, camelContext));
+t.then(verifyCompletedExchanges("validate-order", 1, camelContext));
+t.then(verifyCompletedExchanges("assign-carrier", 1, camelContext));
 ```
 
-**Fallback**: if you cannot reset statistics (e.g., you need cumulative counts across ordered tests), use `it -> it >= 1` predicates instead of exact counts.
+**Fallback**: if you cannot reset statistics (e.g., you need cumulative counts across ordered tests), use `verifyRouteStats("route", "exchangesCompleted >= 1", camelContext)` instead of exact counts.
 
 ### Sleep + controlBus status check is an anti-pattern
 
@@ -2094,7 +2081,7 @@ t.then(
 ```
 
 **Replace with one of:**
-- `assertProcessedExchanges("my-route", it -> it >= 1, camelContext)` — when the route has no output topic (log-only, `direct:` handler). See [Pattern 8](#pattern-8-verify-exchange-processing-via-managedroutembean).
+- `verifyCompletedExchanges("my-route", 1, camelContext)` or `verifyRouteStats("my-route", "exchangesCompleted >= 1", camelContext)` — when the route has no output topic (log-only, `direct:` handler). See [Pattern 8](#pattern-8-verify-exchange-processing-via-route-statistics).
 - `receive().endpoint("kafka:output.topic")` — when the route produces to a verifiable endpoint. Validates both processing AND output content.
 - `parallel()` with multiple `receive()` actions — when the route produces to multiple topics (e.g., wire-tap). See [Pattern 16](#pattern-16-wire-tap-with-fork--parallel-receive).
 
@@ -2177,8 +2164,8 @@ env:
 
 - [ ] Make all `timer:`-based routes (demo generators and business schedulers) toggleable via config property
 - [ ] Check for `@PostConstruct` beans that connect to external services — add toggle property if needed (Spring Boot only, see Pattern 11)
-- [ ] Add Camel management dependency if using `assertProcessedExchanges` (`camel-quarkus-management` / `camel-spring-boot-starter-management`)
-- [ ] Copy `EipTestSupport.java` into the test package (includes `assertProcessedExchanges`)
+- [ ] Add Camel management dependency if using `verifyCompletedExchanges` (`camel-quarkus-management` / `camel-spring-boot-starter-management`)
+- [ ] Copy `EipTestSupport.java` into the test package (includes `verifyCompletedExchanges`, `verifyRouteStats`, `resetRouteStats`)
 - [ ] Create `config/EipInfraSetup.java` (use correct annotations per runtime)
 - [ ] Create `_infra/compose.yaml` with required services only
 - [ ] Create `_infra/postgres/init-schemas.sql` if PostgreSQL is needed

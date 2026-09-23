@@ -265,6 +265,7 @@ class EipTests implements EipTestSupport {
             );
 
             t.given(waitForCamelRouteStarted("messaging-mapper", camelContext));
+            t.given(resetRouteStats(camelContext, "messaging-mapper"));
 
             t.when(
                 send()
@@ -274,9 +275,7 @@ class EipTests implements EipTestSupport {
                     .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
             );
 
-            t.then(
-                assertProcessedExchanges("messaging-mapper", it -> it >= 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("messaging-mapper", 1, camelContext));
         }
     }
 }

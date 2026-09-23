@@ -257,6 +257,7 @@ class EipTests implements EipTestSupport {
             );
 
             t.given(waitForCamelRouteStarted("load-balancer-demo", camelContext));
+            t.given(resetRouteStats(camelContext, "load-balancer-demo", "fulfillment-center-east", "fulfillment-center-central", "fulfillment-center-west"));
 
             for (int i = 0; i < 3; i++) {
                 t.given(createVariables().variable("id", "citrus:randomNumber(4)"));
@@ -269,10 +270,10 @@ class EipTests implements EipTestSupport {
                 );
             }
 
-            t.then(assertProcessedExchanges("load-balancer-demo", it -> it >= 3, camelContext));
-            t.then(assertProcessedExchanges("fulfillment-center-east", it -> it >= 1, camelContext));
-            t.then(assertProcessedExchanges("fulfillment-center-central", it -> it >= 1, camelContext));
-            t.then(assertProcessedExchanges("fulfillment-center-west", it -> it >= 1, camelContext));
+            t.then(verifyCompletedExchanges("load-balancer-demo", 3, camelContext));
+            t.then(verifyCompletedExchanges("fulfillment-center-east", 1, camelContext));
+            t.then(verifyCompletedExchanges("fulfillment-center-central", 1, camelContext));
+            t.then(verifyCompletedExchanges("fulfillment-center-west", 1, camelContext));
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.example.eip.pulsar;
 
+import java.time.Duration;
+
 import com.example.eip.pulsar.config.EipInfraSetup;
 import org.apache.camel.CamelContext;
 import org.apache.camel.test.spring.junit5.CamelSpringBootTest;
@@ -49,9 +51,7 @@ class EipTests implements EipTestSupport {
                     .body("{\"order_id\": 2001, \"customer_id\": \"C-001\", \"item_sku\": \"SKU-P1\", \"quantity\": 2, \"amount\": 49.99}")
             );
 
-            t.then(
-                assertProcessedExchanges("pulsar-order-processor", it -> it >= 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("pulsar-order-processor", 1, camelContext));
         }
     }
 
@@ -78,9 +78,7 @@ class EipTests implements EipTestSupport {
                     .body("{\"order_id\": 3001, \"customer_id\": \"C-001\", \"item_sku\": \"SKU-P2\", \"quantity\": 3, \"status\": \"placed\"}")
             );
 
-            t.then(
-                assertProcessedExchanges("pulsar-keyed-order-processor", it -> it >= 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("pulsar-keyed-order-processor", 1, camelContext));
         }
     }
 
@@ -107,17 +105,39 @@ class EipTests implements EipTestSupport {
                     .body("{\"order_id\": 4002, \"customer_id\": \"C-002\", \"item_sku\": \"SKU-P3\", \"quantity\": 2, \"amount\": 39.98}")
             );
 
-            t.then(
-                assertProcessedExchanges("pulsar-dlt-consumer", it -> it >= 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("pulsar-dlt-consumer", 1, camelContext));
         }
 
         @Test
         public void shouldMonitorDeadLetterTopic() {
+            // quantity=1 triggers the simulated failure, sending the message to the DLT
+            // after maxRedeliverCount=3 retries by Pulsar
             t.given(waitForCamelRouteStarted("pulsar-dlt-monitor", camelContext));
+            t.given(resetRouteStats(camelContext, "pulsar-dlt-monitor"));
 
+            t.when(
+                camel()
+                    .send()
+                    .endpoint(CamelSupport.camel().endpoints()
+                            .pulsar("persistent://public/default/eip.orders.payments")
+                            .serviceUrl("pulsar://localhost:6650")
+                            .producerName("citrus-sb-dlt-monitor-test")::getRawUri)
+                    .message()
+                    .body("{\"order_id\": 4003, \"customer_id\": \"C-003\", \"item_sku\": \"SKU-P4\", \"quantity\": 1, \"amount\": 19.99}")
+            );
+
+            // Pulsar redelivers the failed message 3 times before routing to DLT — allow extra time
             t.then(
-                assertProcessedExchanges("pulsar-dlt-monitor", it -> it >= 0, camelContext)
+                repeatOnError()
+                    .until((i, context) -> i > 60)
+                    .autoSleep(Duration.ofSeconds(2))
+                    .actions(
+                        camel()
+                            .camelContext(camelContext)
+                            .route()
+                            .verifyRouteStats("pulsar-dlt-monitor")
+                            .completed(1)
+                    )
             );
         }
     }

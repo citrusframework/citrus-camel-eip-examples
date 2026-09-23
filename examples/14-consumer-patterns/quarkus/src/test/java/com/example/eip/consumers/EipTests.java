@@ -53,9 +53,7 @@ class EipTests implements EipTestSupport {
                     .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
             );
 
-            t.then(
-                assertProcessedExchanges("event-driven-consumer", 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("event-driven-consumer", 1, camelContext));
         }
     }
 
@@ -81,9 +79,7 @@ class EipTests implements EipTestSupport {
                     .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
             );
 
-            t.then(
-                assertProcessedExchanges("competing-consumers", 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("competing-consumers", 1, camelContext));
         }
     }
 
@@ -110,9 +106,9 @@ class EipTests implements EipTestSupport {
             );
 
             // Wait for the timer-based poll cycle to pick up the message
-            t.then(
-                assertProcessedExchanges("polling-consumer", it -> it > 1, camelContext)
-            );
+            t.then(verifyRouteStats("polling-consumer", """
+                    { "exchangesCompleted": "@greaterThan(1)@" }
+                """, camelContext));
         }
     }
 
@@ -138,9 +134,7 @@ class EipTests implements EipTestSupport {
                     .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
             );
 
-            t.then(
-                assertProcessedExchanges("handle-order-placed", 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("handle-order-placed", 1, camelContext));
         }
 
         @Test
@@ -162,9 +156,7 @@ class EipTests implements EipTestSupport {
                     .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
             );
 
-            t.then(
-                assertProcessedExchanges("handle-order-cancelled", 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("handle-order-cancelled", 1, camelContext));
         }
 
         @Test
@@ -186,9 +178,7 @@ class EipTests implements EipTestSupport {
                     .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
             );
 
-            t.then(
-                assertProcessedExchanges("handle-order-refunded", 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("handle-order-refunded", 1, camelContext));
         }
 
         @Test
@@ -210,9 +200,7 @@ class EipTests implements EipTestSupport {
                     .header(KafkaMessageHeaders.MESSAGE_KEY, "${id}")
             );
 
-            t.then(
-                assertProcessedExchanges("handle-order-unknown", 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("handle-order-unknown", 1, camelContext));
         }
     }
 
@@ -291,9 +279,7 @@ class EipTests implements EipTestSupport {
                     .body(Resources.create("templates/order.json"))
             );
 
-            t.then(
-                assertProcessedExchanges("event-driven-consumer-pulsar", 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("event-driven-consumer-pulsar", 1, camelContext));
         }
     }
 }

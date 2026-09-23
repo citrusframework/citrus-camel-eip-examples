@@ -62,9 +62,7 @@ class EipTests implements EipTestSupport {
                     .body(Resources.create("templates/order.json"))
             );
 
-            t.then(
-                assertProcessedExchanges("durable-subscriber-pulsar", 1, camelContext)
-            );
+            t.then(verifyCompletedExchanges("durable-subscriber-pulsar", 1, camelContext));
         }
     }
 
@@ -118,9 +116,7 @@ class EipTests implements EipTestSupport {
                     .timeout(5000)
             );
 
-            t.then(
-                assertProcessedExchanges("idempotent-receiver", 2, camelContext)
-            );
+            t.then(verifyCompletedExchanges("idempotent-receiver", 2, camelContext));
         }
 
         @Test

@@ -1,6 +1,5 @@
 package com.example.eip.observability;
 
-import java.time.Duration;
 import javax.sql.DataSource;
 
 import io.quarkus.test.junit.QuarkusTest;
@@ -57,8 +56,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.processed?consumerGroup=citrus-processed-wt-group")
@@ -88,8 +86,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.audit?consumerGroup=citrus-audit-group")
@@ -124,8 +121,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.processed?consumerGroup=citrus-processed-hist-group")
@@ -170,8 +166,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         sql(dataSource)
                             .query()

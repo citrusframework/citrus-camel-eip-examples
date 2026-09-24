@@ -1,7 +1,5 @@
 package com.example.eip.drools;
 
-import java.time.Duration;
-
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.apache.camel.CamelContext;
@@ -47,8 +45,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.standard?consumerGroup=citrus-drools-standard-group")
@@ -81,8 +78,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.express?consumerGroup=citrus-drools-express-group")
@@ -115,8 +111,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.hazmat?consumerGroup=citrus-drools-hazmat-group")
@@ -149,8 +144,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.fraud-review?consumerGroup=citrus-drools-fraud-review-group")

@@ -1,7 +1,5 @@
 package com.example.eip.redis;
 
-import java.time.Duration;
-
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.apache.camel.CamelContext;
@@ -49,8 +47,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.enriched?consumerGroup=citrus-enriched-cache-miss-group")
@@ -85,8 +82,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.enriched?consumerGroup=citrus-enriched-cache-hit-group")
@@ -127,8 +123,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.payment-confirmed?consumerGroup=citrus-payment-confirmed-group")

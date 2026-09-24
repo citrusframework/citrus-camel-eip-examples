@@ -1,7 +1,5 @@
 package com.example.eip.otel;
 
-import java.time.Duration;
-
 import com.example.eip.otel.config.EipInfraSetup;
 import org.apache.camel.CamelContext;
 import org.apache.camel.test.spring.junit5.CamelSpringBootTest;
@@ -59,8 +57,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.processed?consumerGroup=citrus-otel-sb-processed-group")

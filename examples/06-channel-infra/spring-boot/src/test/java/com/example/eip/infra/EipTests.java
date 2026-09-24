@@ -1,7 +1,5 @@
 package com.example.eip.infra;
 
-import java.time.Duration;
-
 import com.example.eip.infra.config.EipInfraSetup;
 import org.apache.camel.CamelContext;
 import org.apache.camel.test.spring.junit5.CamelSpringBootTest;
@@ -114,8 +112,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.fulfilled?consumerGroup=citrus-fulfilled-group")
@@ -163,8 +160,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.placed?consumerGroup=citrus-placed-group")

@@ -1,7 +1,5 @@
 package com.example.eip.infra;
 
-import java.time.Duration;
-
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.apache.camel.BindToRegistry;
@@ -106,8 +104,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.fulfilled?consumerGroup=citrus-fulfilled-group")
@@ -152,8 +149,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.placed?consumerGroup=citrus-placed-group")

@@ -1,6 +1,5 @@
 package com.example.eip.composed;
 
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 
@@ -16,8 +15,7 @@ public interface EipTestSupport extends TestActionSupport {
 
     default TestActionBuilder<?> waitForCamelRouteStarted(String routeId, CamelContext camelContext) {
         return repeatOnError()
-                .until((i, context) -> i > 20)
-                .autoSleep(Duration.ofSeconds(1))
+                .times(20)
                 .actions(
                     camel().camelContext(camelContext)
                             .controlBus()
@@ -31,8 +29,7 @@ public interface EipTestSupport extends TestActionSupport {
 
     default TestActionBuilder<?> verifyCompletedExchanges(String routeId, long count, CamelContext camelContext) {
         return repeatOnError()
-                .until((i, context) -> i > 20)
-                .autoSleep(Duration.ofSeconds(1))
+                .times(20)
                 .actions(
                     camel()
                         .camelContext(camelContext)
@@ -44,8 +41,7 @@ public interface EipTestSupport extends TestActionSupport {
 
     default TestActionBuilder<?> verifyRouteStats(String routeId, String stats, CamelContext camelContext) {
         return repeatOnError()
-                .until((i, context) -> i > 20)
-                .autoSleep(Duration.ofSeconds(1))
+                .times(20)
                 .actions(
                     camel()
                         .camelContext(camelContext)

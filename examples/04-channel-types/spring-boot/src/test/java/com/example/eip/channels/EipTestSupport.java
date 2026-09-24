@@ -1,7 +1,5 @@
 package com.example.eip.channels;
 
-import java.time.Duration;
-
 import org.apache.camel.CamelContext;
 import org.apache.camel.ServiceStatus;
 import org.citrusframework.TestActionBuilder;
@@ -11,8 +9,7 @@ public interface EipTestSupport extends TestActionSupport {
 
     default TestActionBuilder<?> waitForCamelRouteStarted(String routeId, CamelContext camelContext) {
         return repeatOnError()
-                .until((i, context) -> i > 20)
-                .autoSleep(Duration.ofSeconds(1))
+                .times(20)
                 .actions(
                     camel().camelContext(camelContext)
                             .controlBus()

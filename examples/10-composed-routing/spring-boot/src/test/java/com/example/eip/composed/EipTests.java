@@ -203,7 +203,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 25)
+                    .times(25)
                     .autoSleep(Duration.ofMillis(500))
                     .actions(
                         receive()

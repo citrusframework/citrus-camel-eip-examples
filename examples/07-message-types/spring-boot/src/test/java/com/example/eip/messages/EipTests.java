@@ -1,7 +1,5 @@
 package com.example.eip.messages;
 
-import java.time.Duration;
-
 import com.example.eip.messages.config.EipInfraSetup;
 import org.apache.camel.CamelContext;
 import org.apache.camel.test.spring.junit5.CamelSpringBootTest;

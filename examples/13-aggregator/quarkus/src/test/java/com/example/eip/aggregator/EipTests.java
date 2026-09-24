@@ -1,7 +1,5 @@
 package com.example.eip.aggregator;
 
-import java.time.Duration;
-
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.apache.camel.BindToRegistry;
@@ -78,8 +76,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.complete?consumerGroup=citrus-complete-group")
@@ -116,8 +113,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.normalized?consumerGroup=citrus-normalized-a-group")
@@ -154,8 +150,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.normalized?consumerGroup=citrus-normalized-b-group")
@@ -192,8 +187,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.normalized?consumerGroup=citrus-normalized-c-group")
@@ -257,8 +251,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.complete-persistent?consumerGroup=citrus-persistent-group")

@@ -1,7 +1,5 @@
 package com.example.eip.flow;
 
-import java.time.Duration;
-
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.apache.camel.CamelContext;
@@ -47,8 +45,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.saga-completed?consumerGroup=citrus-saga-completed-group")
@@ -85,8 +82,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.saga-failed?consumerGroup=citrus-saga-inv-failed-group")
@@ -123,8 +119,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.saga-failed?consumerGroup=citrus-saga-pay-failed-group")

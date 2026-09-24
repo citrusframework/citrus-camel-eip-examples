@@ -95,8 +95,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .selector(KafkaMessageFilter.kafkaMessageFilter()
@@ -163,8 +162,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 20)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(20)
                     .actions(
                         sequential()
                             .actions(
@@ -212,8 +210,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 10)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(10)
                     .actions(
                         receive()
                             .selector(KafkaMessageFilter.kafkaMessageFilter()

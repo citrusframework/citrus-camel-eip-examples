@@ -1,6 +1,5 @@
 package com.example.eip.consumers;
 
-import java.time.Duration;
 import javax.sql.DataSource;
 
 import io.quarkus.test.junit.QuarkusTest;
@@ -224,8 +223,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.placed?consumerGroup=citrus-placed-group")

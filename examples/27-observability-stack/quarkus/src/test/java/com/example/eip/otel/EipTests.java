@@ -1,7 +1,5 @@
 package com.example.eip.otel;
 
-import java.time.Duration;
-
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.apache.camel.CamelContext;
@@ -54,8 +52,7 @@ class EipTests implements EipTestSupport {
 
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 15)
-                    .autoSleep(Duration.ofSeconds(1))
+                    .times(15)
                     .actions(
                         receive()
                             .endpoint("kafka:eip.orders.processed?consumerGroup=citrus-otel-processed-group")

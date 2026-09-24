@@ -129,7 +129,7 @@ class EipTests implements EipTestSupport {
             // Pulsar redelivers the failed message 3 times before routing to DLT — allow extra time
             t.then(
                 repeatOnError()
-                    .until((i, context) -> i > 60)
+                    .times(60)
                     .autoSleep(Duration.ofSeconds(2))
                     .actions(
                         camel()

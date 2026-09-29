@@ -1,0 +1,9 @@
+[
+  {"route_id":"traced-order-pipeline","status":"Started"},
+  {"route_id":"otel-validate-order","status":"Started"},
+  {"route_id":"otel-enrich-order","status":"Started"},
+  {"route_id":"otel-complete-order","status":"Started"},
+  {"route_id":"metrics-order-counter","status":"Started"},
+  {"route_id":"metrics-orders-summary","status":"Started"},
+  {"route_id":"health-probe-handler","status":"Started"}
+]

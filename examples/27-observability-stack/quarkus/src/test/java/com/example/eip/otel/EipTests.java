@@ -8,6 +8,7 @@ import org.citrusframework.annotations.CitrusResource;
 import org.citrusframework.quarkus.CitrusSupport;
 import org.citrusframework.spi.BindToRegistry;
 import org.citrusframework.spi.Resources;
+import org.citrusframework.validation.context.json.JsonMessageValidationContext;
 import org.junit.jupiter.api.ClassOrderer;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
@@ -90,7 +91,6 @@ class EipTests implements EipTestSupport {
                     .get("/health/routes")
             );
 
-            // Verify 200 OK and that the response is a non-empty JSON array
             t.then(
                 http()
                     .client("http://localhost:8081")
@@ -98,6 +98,8 @@ class EipTests implements EipTestSupport {
                     .response(HttpStatus.OK)
                     .message()
                     .contentType("application/json")
+                    .body(Resources.create("templates/health-routes-response.json"))
+                    .validate(JsonMessageValidationContext.Builder.json().strict(false))
             );
         }
     }
@@ -117,7 +119,6 @@ class EipTests implements EipTestSupport {
                     .get("/metrics/orders")
             );
 
-            // Verify 200 OK and that the response is a non-empty JSON array
             t.then(
                 http()
                     .client("http://localhost:8081")
@@ -125,7 +126,11 @@ class EipTests implements EipTestSupport {
                     .response(HttpStatus.OK)
                     .message()
                     .contentType("application/json")
+                    .body(Resources.create("templates/metrics-orders-response.json"))
+                    .validate(JsonMessageValidationContext.Builder.json().strict(false))
             );
+
+            t.then(delay().seconds(60));
         }
     }
 }

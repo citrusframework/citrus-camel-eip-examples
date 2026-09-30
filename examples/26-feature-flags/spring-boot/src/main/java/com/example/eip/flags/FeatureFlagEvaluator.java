@@ -34,25 +34,26 @@ public class FeatureFlagEvaluator {
     @Value("${flagd.port:8013}")
     int flagdPort;
 
+    @Value("${flagd.provider.init:true}")
+    boolean initProvider;
+
     private Client client;
 
     @PostConstruct
     void init() {
         OpenFeatureAPI api = OpenFeatureAPI.getInstance();
-        FlagdOptions options = FlagdOptions.builder()
-            .host(flagdHost)
-            .port(flagdPort)
-            .build();
-        // setProvider, not setProviderAndWait. The provider establishes its
-        // event stream to flagd in the background, and blocking startup on that
-        // stream buys nothing here: every lookup below already carries a
-        // default, so evaluations made before the stream is up simply get the
-        // default rather than failing. Waiting only converts a slow flagd into
-        // a failed startup.
-        api.setProvider(new FlagdProvider(options));
+        if (initProvider) {
+            FlagdOptions options = FlagdOptions.builder()
+                .host(flagdHost)
+                .port(flagdPort)
+                .build();
+            api.setProvider(new FlagdProvider(options));
+            LOG.info("OpenFeature client created for flagd at {}:{} (connecting in background)",
+                flagdHost, flagdPort);
+        } else {
+            LOG.info("Skipping FlagdProvider init — using pre-configured provider");
+        }
         client = api.getClient("eip-shipping");
-        LOG.info("OpenFeature client created for flagd at {}:{} (connecting in background)",
-            flagdHost, flagdPort);
     }
 
     /** Boolean flag, defaulting to false when flagd cannot be reached. */

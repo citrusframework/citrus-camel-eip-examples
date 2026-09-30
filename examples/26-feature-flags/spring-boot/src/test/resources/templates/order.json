@@ -1,0 +1,7 @@
+{
+  "order_id": "${id}",
+  "customer_tier": "${tier}",
+  "item_sku": "SKU-TEST-${id}",
+  "quantity": 1,
+  "amount": ${amount}
+}

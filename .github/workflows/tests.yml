@@ -36,6 +36,7 @@ jobs:
           - 22-redis-integration
           - 23-quarkus-dev
           - 24-drools-rules
+          - 26-feature-flags
           - 27-observability-stack
           - 37-testing-strategies
       fail-fast: false
@@ -76,6 +77,7 @@ jobs:
           - 21-pulsar-deep-dive
           - 22-redis-integration
           - 24-drools-rules
+          - 26-feature-flags
           - 27-observability-stack
           - 37-testing-strategies
       fail-fast: false

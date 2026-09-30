@@ -1322,7 +1322,7 @@ Both receives share the same consumer group so the second receive picks up where
 
 ### Pattern 11: Deferred initialization for external-service beans
 
-When a production bean eagerly connects to an external service in `@PostConstruct` (e.g., seeding a Redis catalog, preloading a database cache), the Spring Boot test context will fail because Citrus hasn't started the infrastructure yet. The fix:
+When a production bean eagerly connects to an external service in `@PostConstruct` (e.g., seeding a Redis catalog, preloading a database cache), the test context will fail because Citrus hasn't started the infrastructure yet. The fix:
 
 1. Add a toggle property with a default of `true` (no change to production behavior)
 2. Split `@PostConstruct` into a guard method + a public initialization method
@@ -1343,7 +1343,41 @@ public void shouldEnrichOrderWithProductData() {
 }
 ```
 
-This only affects **Spring Boot** tests. Quarkus manages the lifecycle differently — `@PostConstruct` runs after Citrus `beforeSuite` has already started compose, so the service is available. If you encounter the same issue in Quarkus in the future, apply the same pattern.
+This affects both **Spring Boot** and **Quarkus** tests. In Spring Boot the `@PostConstruct` fires during context creation, before Citrus `beforeSuite` starts compose. In Quarkus the timing is usually safe, but the singleton SDK variant (below) can still cause issues.
+
+#### Variant: Singleton SDK provider clobbering
+
+A subtler form of this problem occurs when a third-party SDK uses a **global singleton** to manage its provider (e.g., `OpenFeatureAPI.getInstance().setProvider(...)`). Even when `beforeSuite` has already started the infrastructure and verified the connection, the production bean's `@PostConstruct` calls `setProvider()` on the singleton — which **replaces** the test's already-connected provider with a fresh, unconnected one. The SDK then returns default values instead of the real flag evaluations.
+
+This affects **both Quarkus and Spring Boot** because the singleton is a static JVM-global, not a CDI/Spring-managed bean.
+
+**Fix**: add a boolean toggle property that skips provider creation in `@PostConstruct` when `false`. The test's `beforeSuite` creates and verifies the provider; the production bean reuses it via the singleton's existing state.
+
+Production bean (Quarkus example — Spring Boot uses `@Value` instead of `@ConfigProperty`):
+
+```java
+@ConfigProperty(name = "flagd.provider.init", defaultValue = "true")
+boolean initProvider;
+
+@PostConstruct
+void init() {
+    OpenFeatureAPI api = OpenFeatureAPI.getInstance();
+    if (initProvider) {
+        FlagdOptions options = FlagdOptions.builder()
+            .host(flagdHost).port(flagdPort).build();
+        api.setProvider(new FlagdProvider(options));
+    }
+    client = api.getClient("eip-shipping");  // reuses whatever provider is set
+}
+```
+
+Test `application.properties`:
+
+```properties
+flagd.provider.init=false
+```
+
+The `beforeSuite` in `EipInfraSetup` creates the provider and verifies it works before any test runs (see [Pattern 17](#pattern-17-beforesuite-preflight-verification-for-non-http-services)). The production bean's `@PostConstruct` skips `setProvider()` and just calls `getClient()` on the singleton — which returns a client backed by the test's verified provider.
 
 ### Pattern 12: SQL database interaction with citrus-sql
 
@@ -1639,9 +1673,9 @@ receive().endpoint("kafka:eip.metadata.orders.dead?consumerGroup=citrus-dead-gro
 
 The same principle applies to filters (test messages that pass AND messages that are filtered out), enrichers (verify the enriched fields are present), and aggregators (verify the aggregation header and reassembled output).
 
-### Spring Boot `@PostConstruct` and infrastructure lifecycle
+### `@PostConstruct` and infrastructure lifecycle
 
-When a production bean has `@PostConstruct` that connects to an external service (Redis, database, message broker), the Spring Boot test context loads **before** Citrus `beforeSuite` starts the compose infrastructure. The `@PostConstruct` fires during context creation, the service isn't running yet, and the test fails with a connection error (e.g., `RedisConnectionFailureException`).
+When a production bean has `@PostConstruct` that connects to an external service (Redis, database, message broker), the test context may load **before** Citrus `beforeSuite` starts the compose infrastructure. The `@PostConstruct` fires during context creation, the service isn't running yet, and the test fails with a connection error (e.g., `RedisConnectionFailureException`). This is most common in Spring Boot but can also affect Quarkus depending on CDI lifecycle ordering.
 
 **Fix**: make the eager initialization conditional and call it explicitly in the test after infrastructure is up. See [Pattern 11](#pattern-11-deferred-initialization-for-external-service-beans).
 
@@ -1686,6 +1720,8 @@ public void shouldEnrichOrder() {
 ```
 
 This pattern applies whenever a `@Component`/`@Service` connects to infrastructure in `@PostConstruct`. The default property value stays `true` so production behavior is unchanged.
+
+A related but distinct problem occurs with **singleton SDK providers** (e.g., OpenFeature) — even when infrastructure is running, `@PostConstruct` can replace a provider the test already verified. See [Pattern 11 singleton variant](#variant-singleton-sdk-provider-clobbering) and [Pattern 17](#pattern-17-beforesuite-preflight-verification-for-non-http-services).
 
 ### Deterministic test data for hash-based logic
 
@@ -2106,6 +2142,110 @@ Camel's `wireTap()` creates a shallow copy of the exchange. When the body is a `
 
 If the route needs a clean copy (no leaked fields), the route itself should deep-copy the body *before* the wire-tap fires — but that's a route design decision, not a test fix.
 
+### Pattern 17: `beforeSuite` preflight verification for non-HTTP services
+
+When test infrastructure includes a service that has no HTTP health endpoint (e.g., flagd's gRPC port, a custom TCP service), `waitFor().http()` cannot verify readiness. Instead, use `repeatOnError` in `beforeSuite` with a custom action that creates a client, calls the service, and throws on failure.
+
+This is especially important when the service must be fully connected before any test runs — for example, when an SDK provider (OpenFeature/flagd) needs an established gRPC stream before flag evaluations return real values instead of defaults.
+
+```java
+@BindToRegistry  // Quarkus — use @Bean for Spring Boot
+public BeforeSuite startInfra() {
+    return beforeSuite().actions(
+                testcontainers().compose()
+                        .up("_infra/compose.yaml")
+                        .containerName("eip-infra")
+                        .autoRemove(false),
+                waitFor()
+                        .http()
+                        .url("http://localhost:8090")
+                        .seconds(25),
+                repeatOnError()
+                        .times(25)
+                        .actions(verifyFlagdConnectivity())
+            ).build();
+}
+
+private TestActionBuilder<?> verifyFlagdConnectivity() {
+    OpenFeatureAPI api = OpenFeatureAPI.getInstance();
+    FlagdOptions options = FlagdOptions.builder()
+            .host("localhost")
+            .port(8013)
+            .build();
+    api.setProvider(new FlagdProvider(options));
+    Client client = api.getClient("eip-shipping");
+
+    return () -> context -> {
+        if (client.getBooleanValue("enrichment-enabled", false)) {
+            log.info("Connected to flagd eip-shipping!");
+        } else {
+            throw new CitrusRuntimeException("Not connected to flagd eip-shipping");
+        }
+    };
+}
+```
+
+Key points:
+- The provider and client are created **once** outside the retry lambda — only the boolean evaluation is retried. This avoids creating new gRPC connections on every retry.
+- The `setProvider()` call sets the singleton's provider, which the production bean later reuses (see [Pattern 11 singleton variant](#variant-singleton-sdk-provider-clobbering)).
+- The `repeatOnError` retries until the flag returns `true`, meaning flagd's gRPC stream is established and the flag configuration is loaded.
+- If the service never becomes ready, the test fails in `beforeSuite` with a clear error rather than silently returning default values during the actual tests.
+
+### Pattern 18: Testing probabilistic/fractional routing
+
+When a route uses hash-based fractional evaluation (e.g., flagd's `fractional` targeting rule that splits traffic 90/10), individual message outcomes are deterministic per targeting key but unpredictable from the test's perspective. Sending a single message and asserting a specific path is fragile — the hash might route it either way.
+
+**Fix**: send N messages with `iterate()`, capture route stats into Citrus variables, and assert aggregate invariants (total sum, minority path hit at least once).
+
+```java
+t.given(resetRouteStats(camelContext,
+        "feature-flag-ab-test", "algorithm-content-based-router", "algorithm-dynamic-router"));
+
+t.when(
+    iterate()
+        .times(10)
+        .actions(
+            createVariables()
+                    .variable("id", "citrus:randomNumber(4)"),
+            send()
+                .endpoint("kafka:eip.orders.placed")
+                .message()
+                .fork(true)
+                .body(Resources.create("templates/order.json"))
+                .header(KafkaMessageHeaders.MESSAGE_KEY, "AB-${id}")
+        )
+);
+
+// Wait for all 10 to be processed
+t.then(verifyCompletedExchanges("feature-flag-ab-test", 10, camelContext));
+
+// Capture each branch's count into a Citrus variable
+t.then(verifyRouteStats("algorithm-content-based-router", """
+{ "exchangesCompleted": "@variable(algorithm-legacy-count)@" }
+""", camelContext));
+t.then(verifyRouteStats("algorithm-dynamic-router", """
+{ "exchangesCompleted": "@variable(algorithm-new-count)@" }
+""", camelContext));
+
+// Assert invariants: all messages accounted for, minority path hit at least once
+t.then(context -> {
+    int legacyCount = context.getVariable("algorithm-legacy-count", Integer.class);
+    int newCount = context.getVariable("algorithm-new-count", Integer.class);
+
+    Assertions.assertEquals(10, legacyCount + newCount);
+    Assertions.assertTrue(newCount > 0);
+});
+```
+
+Key points:
+- `citrus:randomNumber(4)` inside `iterate()` generates a different targeting key per message, ensuring the hash function distributes across both paths.
+- `fork(true)` on the send prevents blocking — the iterate loop fires all 10 messages quickly.
+- The `@variable(name)@` syntax in the stats JSON captures the actual count into a Citrus variable for use in the subsequent assertion lambda.
+- `assertTrue(newCount > 0)` is the right assertion for the minority path — with 10 messages and a 10% split, it's statistically near-certain that at least one hits the minority. Don't assert exact counts (e.g., exactly 1 or exactly 9) because the hash distribution over random keys is unpredictable.
+- `assertEquals(10, legacyCount + newCount)` is the completeness check — all messages were routed to one of the two paths, none were lost or double-counted.
+
+---
+
 ### `KafkaMessageHeaders.MESSAGE_KEY` does not work with `KafkaMessageFilter`
 
 `KafkaMessageHeaders.MESSAGE_KEY` (`citrus_kafka_messageKey`) is a Citrus pseudo-header that represents the Kafka record key. It is **not** a real Kafka header — the record key is a separate attribute of the Kafka `ConsumerRecord`, not part of the headers map. `KafkaMessageFilter.kafkaHeaderEquals()` searches actual Kafka headers, so filtering by `citrus_kafka_messageKey` will never match:
@@ -2163,7 +2303,8 @@ env:
 ### Per runtime (Quarkus / Spring Boot)
 
 - [ ] Make all `timer:`-based routes (demo generators and business schedulers) toggleable via config property
-- [ ] Check for `@PostConstruct` beans that connect to external services — add toggle property if needed (Spring Boot only, see Pattern 11)
+- [ ] Check for `@PostConstruct` beans that connect to external services — add toggle property if needed (see Pattern 11, applies to both runtimes)
+- [ ] Check for singleton SDK providers (e.g., OpenFeature) — add `beforeSuite` preflight verification and init toggle (see Pattern 11 singleton variant + Pattern 17)
 - [ ] Add Camel management dependency if using `verifyCompletedExchanges` (`camel-quarkus-management` / `camel-spring-boot-starter-management`)
 - [ ] Copy `EipTestSupport.java` into the test package (includes `verifyCompletedExchanges`, `verifyRouteStats`, `resetRouteStats`)
 - [ ] Create `config/EipInfraSetup.java` (use correct annotations per runtime)

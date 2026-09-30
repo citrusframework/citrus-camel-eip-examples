@@ -95,6 +95,16 @@ public class FeatureFlagRoutes extends RouteBuilder {
                 exchange.getIn().setHeader("customerTier", tier);
             })
             .log("Order ${body[order_id]} tier=${header.customerTier} "
-                + "hazmat=${header.hazmatVariant}");
+                + "hazmat=${header.hazmatVariant}")
+            .toD().allowedSchemes("direct")
+                .uri("direct:orders-hazmat-${header.hazmatVariant}");
+
+        from("direct:orders-hazmat-v1")
+            .routeId("eip-orders-hazmat-v1")
+            .log("  [v1] legacy hazmat compliance for ${body[order_id]}");
+
+        from("direct:orders-hazmat-v2")
+            .routeId("eip-orders-hazmat-v2")
+            .log("  [v2] new hazmat compliance for ${body[order_id]}");
     }
 }

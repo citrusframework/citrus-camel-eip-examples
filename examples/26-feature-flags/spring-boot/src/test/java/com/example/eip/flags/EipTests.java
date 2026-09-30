@@ -126,7 +126,7 @@ class EipTests implements EipTestSupport {
 
         @Test
         @Order(1)
-        public void shouldEvaluateTargetedFlagForStandardTier() {
+        public void shouldRouteStandardTierToHazmatV1() {
             t.given(
                 createVariables()
                     .variable("id", "citrus:randomNumber(4)")
@@ -135,7 +135,8 @@ class EipTests implements EipTestSupport {
             );
 
             t.given(waitForCamelRouteStarted("feature-flag-targeted", camelContext));
-            t.given(resetRouteStats(camelContext, "feature-flag-targeted"));
+            t.given(resetRouteStats(camelContext,
+                    "feature-flag-targeted", "eip-orders-hazmat-v1", "eip-orders-hazmat-v2"));
 
             t.when(
                 send()
@@ -146,11 +147,13 @@ class EipTests implements EipTestSupport {
             );
 
             t.then(verifyCompletedExchanges("feature-flag-targeted", 1, camelContext));
+            t.then(verifyCompletedExchanges("eip-orders-hazmat-v1", 1, camelContext));
+            t.then(verifyCompletedExchanges("eip-orders-hazmat-v2", 0, camelContext));
         }
 
         @Test
         @Order(2)
-        public void shouldEvaluateTargetedFlagForEnterpriseTier() {
+        public void shouldRouteEnterpriseTierToHazmatV2() {
             t.given(
                 createVariables()
                     .variable("id", "citrus:randomNumber(4)")
@@ -158,7 +161,8 @@ class EipTests implements EipTestSupport {
                     .variable("amount", 500)
             );
 
-            t.given(resetRouteStats(camelContext, "feature-flag-targeted"));
+            t.given(resetRouteStats(camelContext,
+                    "feature-flag-targeted", "eip-orders-hazmat-v1", "eip-orders-hazmat-v2"));
 
             t.when(
                 send()
@@ -169,11 +173,13 @@ class EipTests implements EipTestSupport {
             );
 
             t.then(verifyCompletedExchanges("feature-flag-targeted", 1, camelContext));
+            t.then(verifyCompletedExchanges("eip-orders-hazmat-v1", 0, camelContext));
+            t.then(verifyCompletedExchanges("eip-orders-hazmat-v2", 1, camelContext));
         }
 
         @Test
         @Order(3)
-        public void shouldEvaluateTargetedFlagForVipTier() {
+        public void shouldRouteVipTierToHazmatV2() {
             t.given(
                 createVariables()
                     .variable("id", "citrus:randomNumber(4)")
@@ -181,7 +187,8 @@ class EipTests implements EipTestSupport {
                     .variable("amount", 250)
             );
 
-            t.given(resetRouteStats(camelContext, "feature-flag-targeted"));
+            t.given(resetRouteStats(camelContext,
+                    "feature-flag-targeted", "eip-orders-hazmat-v1", "eip-orders-hazmat-v2"));
 
             t.when(
                 send()
@@ -192,6 +199,8 @@ class EipTests implements EipTestSupport {
             );
 
             t.then(verifyCompletedExchanges("feature-flag-targeted", 1, camelContext));
+            t.then(verifyCompletedExchanges("eip-orders-hazmat-v1", 0, camelContext));
+            t.then(verifyCompletedExchanges("eip-orders-hazmat-v2", 1, camelContext));
         }
     }
 }

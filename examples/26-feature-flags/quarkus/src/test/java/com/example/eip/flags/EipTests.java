@@ -86,7 +86,6 @@ class EipTests implements EipTestSupport {
                         send()
                             .endpoint("kafka:eip.orders.placed")
                             .message()
-                            .fork(true)
                             .body(Resources.create("templates/order.json"))
                             .header(KafkaMessageHeaders.MESSAGE_KEY, "AB-${id}")
                     )
@@ -105,7 +104,7 @@ class EipTests implements EipTestSupport {
                 int algorithmNewCount = context.getVariable("algorithm-new-count", Integer.class);
 
                 Assertions.assertEquals(10, algorithmLegacyCount + algorithmNewCount);
-                Assertions.assertTrue(algorithmNewCount > 0);
+                Assertions.assertTrue(algorithmNewCount > 0, "Algorithm new count must be greater than 0");
             });
         }
     }

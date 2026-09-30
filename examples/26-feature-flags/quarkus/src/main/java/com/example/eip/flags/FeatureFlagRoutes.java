@@ -28,13 +28,17 @@ public class FeatureFlagRoutes extends RouteBuilder {
                 .when(header("enrichmentEnabled").isEqualTo(true))
                     .to("direct:enrich-order")
                 .otherwise()
-                    .log("Enrichment disabled by feature flag for ${body[order_id]}")
+                    .to("direct:skip-enrichment")
             .end()
             .to("direct:process-order");
 
         from("direct:enrich-order")
             .routeId("enrich-order")
             .log("Enriching order ${body[order_id]}");
+
+        from("direct:skip-enrichment")
+            .routeId("skip-enrichment")
+            .log("Enrichment disabled by feature flag for ${body[order_id]}");
 
         from("direct:process-order")
             .routeId("process-order")

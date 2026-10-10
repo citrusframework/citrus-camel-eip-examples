@@ -244,4 +244,4 @@ from("direct:publish-order")
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — the batched, compressed, idempotent and synchronous producers all run against live Kafka 4.3.1 and their verifier consumers receive the results, with zero errors (2026-09-14).*
+*Verification status: <span class="status status--verified">verified</span> — both runtime variants run on Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1) against the stack on Docker Engine: the batched, compressed, idempotent and synchronous producers and their verifiers all log traffic, with no errors (2026-10-09).*

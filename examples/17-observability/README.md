@@ -23,14 +23,14 @@ mvn spring-boot:run
 
 # YAML DSL (Camel CLI — no Maven required)
 cd examples/17-observability/yaml-dsl
-camel run *
+camel run * --port=8082   # REST port is a CLI flag; 8080 is Pulsar's
 ```
 
 > **Note:** The YAML DSL variant includes only the declarative EIP routes. Data generators and Java-specific patterns (custom aggregation strategies, CDI beans) remain in the Quarkus and Spring Boot variants.
 
 ## Infrastructure
 
-Requires **Kafka** and **PostgreSQL** from the Podman stack.
+Requires **Kafka** and **PostgreSQL** from the compose stack.
 
 ## Data flow
 
@@ -89,4 +89,4 @@ curl -X POST http://localhost:8082/control/start/wiretap-order-processor
 
 ---
 
-*Verification status: Quarkus variant verified against Quarkus 3.39.3, Camel 4.22.0 on Podman (2026-07-11). Spring Boot variant compiles against Spring Boot 4.1.1, Camel 4.22.0.*
+*Verification status: both variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1); the chapter footer records the integration-test result on Docker Engine (2026-10-09).*

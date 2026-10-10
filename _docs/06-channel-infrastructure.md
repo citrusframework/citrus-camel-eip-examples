@@ -25,7 +25,7 @@ mvn spring-boot:run
 ```bash
 # YAML DSL (Camel CLI)
 cd examples/06-channel-infra/yaml-dsl
-camel run *
+camel run * --port=8082   # REST port is a CLI flag; 8080 is Pulsar's
 ```
 
 The previous two chapters covered what channels are and how they handle failures. This chapter covers how channels connect to the outside world — how a REST API feeds into a Kafka topic, how messages flow between Kafka and Pulsar, and how a Message Bus provides a shared infrastructure that multiple applications can plug into without point-to-point wiring.
@@ -243,4 +243,4 @@ This completes Part 3 — Messaging Channels. Next, we move inside the message i
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.0 (Quarkus 3.39.3 / Spring Boot 4.1.1) and their 6 Citrus integration tests pass against live containers (2026-09-14).*
+*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1) and their 6 Citrus integration tests pass against live containers on Docker Engine (2026-10-09).*

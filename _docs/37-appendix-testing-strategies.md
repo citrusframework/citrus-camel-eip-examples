@@ -544,28 +544,25 @@ The `--reporter-junit-export` flag produces JUnit XML that CI systems (GitHub Ac
 | `mvn verify` | Tier 1 + Tier 2 | Failsafe starts packaged app | ~30-60s |
 | `mvn verify -Pnewman` | All three | Above + Newman (app must be running) | ~90s |
 
-### Before you run them: point Testcontainers at Podman
+### Before you run them: Docker Engine
 
 Anything that starts a container — Tier 2 here, and the Citrus suites in
 [Appendix W]({% link _docs/41-appendix-citrus-testing.md %}) — goes through Testcontainers, which
-looks for a **Docker** socket and does not know about Podman. Export this once
-in your shell:
+talks to Docker Engine on `/var/run/docker.sock`. Check the daemon answers:
 
 ```bash
-systemctl --user enable --now podman.socket
-export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"
+docker info >/dev/null && echo ok
 ```
 
-If you skip it, you get one of two confusing outcomes: "Could not find a valid
-Docker environment" (which reads like a missing dependency — it is not, Docker
-is not required here), or, if Docker happens to be installed, tests that pass
-while quietly running on a different container engine than everything else.
+If it does not, the tests fail with "Could not find a valid Docker
+environment": start the daemon (`sudo systemctl enable --now docker`) and make
+sure your user is in the `docker` group.
 
 Also stop the dev stack before running them. Both bind 9092, 6379, 5432 and
 6650, and the clash surfaces as an unhelpful container startup failure:
 
 ```bash
-podman-compose -p eip -f examples/_infra/compose.yaml down
+docker compose -p eip -f examples/_infra/compose.yaml down
 ```
 
 ### Continuous testing
@@ -615,7 +612,7 @@ Appendix C showed how `mvn quarkus:dev` runs tests continuously as you code. Pre
 %test.quarkus.camel.routes-discovery.exclude-patterns=**/DemoDataGenerator*
 ```
 
-**Port conflicts with the Podman stack.** If your local Podman stack is running Kafka on port 9092 and Dev Services tries to start another Kafka, you get port conflicts. Disable Dev Services when using the local stack:
+**Port conflicts with the compose stack.** If your local compose stack is running Kafka on port 9092 and Dev Services tries to start another Kafka, you get port conflicts. Disable Dev Services when using the local stack:
 
 ```properties
 %test.quarkus.kafka.devservices.enabled=false
@@ -647,4 +644,4 @@ Appendix C showed how `mvn quarkus:dev` runs tests continuously as you code. Pre
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.0 (Quarkus 3.39.3 / Spring Boot 4.1.1) and their 20 Citrus integration tests pass against live containers (2026-09-14).*
+*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1) and pass 14 tests each — 10 unit, 4 integration (2026-10-09).*

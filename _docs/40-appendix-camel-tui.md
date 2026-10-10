@@ -667,4 +667,4 @@ For production monitoring with alerting, dashboards, and historical data, you st
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — the demo routes run on Camel CLI 4.22.0 against the live stack, with the generator driving orders end to end through validation, Kafka and the processing route with zero errors (2026-09-14). The TUI screens themselves are described from use, not captured by an automated check.*
+*Verification status: <span class="status status--verified">verified</span> — the demo routes run clean on Camel CLI 4.22.1 against the stack on Docker Engine (2026-10-09). The TUI screens themselves are described from use, not captured by an automated check.*

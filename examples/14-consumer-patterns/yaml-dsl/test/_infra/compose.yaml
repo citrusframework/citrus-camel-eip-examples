@@ -24,8 +24,6 @@ services:
       - CLUSTER_ID=RUlQQ2FtZWxQYXR0ZXJucw
     volumes:
       - kafka-data:/var/lib/kafka/data:Z
-    devices:
-      - "/dev/null:/dev/null:rwm"
     mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 9092"]
@@ -37,7 +35,7 @@ services:
       - eip-net
 
   kafka-ui:
-    image: docker.io/provectuslabs/kafka-ui:v0.7.2
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
     ports:
       - "8090:8080"
     environment:
@@ -51,7 +49,7 @@ services:
       - eip-net
 
   pulsar:
-    image: docker.io/apachepulsar/pulsar:4.2.4
+    image: docker.io/apachepulsar/pulsar:5.0.0
     command: bin/pulsar standalone --advertised-address localhost
     ports:
       - "6650:6650"
@@ -62,8 +60,6 @@ services:
       - PULSAR_STANDALONE_USE_ZOOKEEPER=0
     volumes:
       - pulsar-data:/pulsar/data:Z
-    devices:
-      - "/dev/null:/dev/null:rwm"
     mem_limit: 2g
     healthcheck:
       test: ["CMD-SHELL", "bin/pulsar-admin brokers healthcheck"]
@@ -79,15 +75,13 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_DB=eip
-      - POSTGRES_USER=eip
-      - POSTGRES_PASSWORD=eip
+      - POSTGRES_DB=eipdb
+      - POSTGRES_USER=eipuser
+      - POSTGRES_PASSWORD=eippass
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
     volumes:
       - postgres-data:/var/lib/postgresql:Z
       - ./postgres/init-schemas.sql:/docker-entrypoint-initdb.d/01-init-schemas.sql:Z
-    devices:
-      - "/dev/null:/dev/null:rwm"
     mem_limit: 1g
     command:
       - "postgres"
@@ -96,7 +90,7 @@ services:
       - "-c"
       - "shared_buffers=128MB"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U eip -d eip"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U eipuser -d eipdb"]
       interval: 5s
       timeout: 3s
       retries: 12

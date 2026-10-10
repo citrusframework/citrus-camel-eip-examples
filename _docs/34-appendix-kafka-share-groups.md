@@ -184,4 +184,4 @@ For workloads that need queue semantics today, Pulsar's Shared subscription (App
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — `examples/34-kafka-share-groups/share-groups-demo.sh` was run against Kafka 4.3.1 in the Podman stack on 2026-09-16. Nine orders split 3/3/3 across three workers on a three-partition topic; accepted and rejected messages did not reappear on a second pass, released ones did. Camel itself has no share-group support at 4.22, which is why the example is a script.*
+*Verification status: <span class="status status--verified">verified</span> — `share-groups-demo.sh` runs to completion against Kafka 4.3.1 in the compose stack on Docker Engine: nine orders split across the three consumers, accepted and rejected records do not reappear, released ones do (2026-10-09).*

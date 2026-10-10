@@ -333,7 +333,7 @@ camel run message-router.yaml --dev
 For routes that consume from Kafka, make sure the local stack is running (`./scripts/setup-stack.sh`). You can publish test messages to `eip.orders.placed` using the Kafka UI at `http://localhost:8090` or from the command line:
 
 ```bash
-podman exec eip-kafka /opt/kafka/bin/kafka-console-producer.sh \
+docker exec eip-kafka /opt/kafka/bin/kafka-console-producer.sh \
   --bootstrap-server localhost:9092 \
   --topic eip.orders.placed
 ```
@@ -375,6 +375,6 @@ These six building blocks are the vocabulary for the rest of this tutorial. Next
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — a conceptual chapter with no runnable example of its own; every Java snippet compiles against Camel 4.22.0 and the channels it names are the topics the examples actually use (2026-09-14).*
+*Verification status: <span class="status status--verified">verified</span> — a conceptual chapter with no runnable example of its own; every Java snippet compiles against Camel 4.22.1 and the channels it names are the topics the examples actually use (2026-10-09).*
 
 *To confirm on re-verification: all Camel route examples compile and run with `camel run` against Camel 4.22; Kafka component header names (kafka.KEY, kafka.PARTITION, kafka.OFFSET) match actual Camel Kafka component behavior; Simple expression syntax for map access (`${body[field]}`) works as shown.*

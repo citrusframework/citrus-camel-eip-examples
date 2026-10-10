@@ -40,7 +40,7 @@ A production Pulsar cluster has three distinct layers:
 
 The key architectural advantage is that brokers are stateless. When a broker fails, another broker takes over the topic immediately — there is no partition reassignment delay like Kafka rebalances. Scaling up means adding brokers; the load balancer redistributes topic ownership without data movement.
 
-Our Podman stack runs Pulsar in **standalone mode** — a single process that embeds a broker, bookie, and ZooKeeper. This is fine for development but not for production.
+Our compose stack runs Pulsar in **standalone mode** — a single process that embeds a broker, bookie, and ZooKeeper. This is fine for development but not for production.
 
 ## Topic structure
 
@@ -218,7 +218,7 @@ In our shipping domain, Kafka is the primary broker. Pulsar is used selectively 
 
 ## Production tuning
 
-Key configuration areas when moving Pulsar beyond the development Podman stack:
+Key configuration areas when moving Pulsar beyond the development compose stack:
 
 ### Broker and BookKeeper tuning
 
@@ -266,4 +266,4 @@ Key parameters for the `pulsar:` component:
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.0 (Quarkus 3.39.3 / Spring Boot 4.1.1) and their 8 Citrus integration tests pass against live containers (2026-09-14).*
+*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1) and their 8 Citrus integration tests pass against live Pulsar 5.0.0 containers on Docker Engine (2026-10-09).*

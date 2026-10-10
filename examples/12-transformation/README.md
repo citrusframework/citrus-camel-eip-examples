@@ -23,7 +23,7 @@ mvn spring-boot:run
 
 ## Infrastructure
 
-Requires Kafka and Redis from the Podman stack. On startup, the `RedisProductCatalog` bean seeds product data into Redis hashes (Quarkus uses CDI `@Startup`; Spring Boot uses `@PostConstruct`).
+Requires Kafka and Redis from the compose stack. On startup, the `RedisProductCatalog` bean seeds product data into Redis hashes (Quarkus uses CDI `@Startup`; Spring Boot uses `@PostConstruct`).
 
 ## Data flow
 
@@ -70,4 +70,4 @@ Follow the message through all three stages: `eip.orders.placed` (translated), `
 Each key is a Redis hash with fields: `name`, `price`, `category`, `weight_kg`, `shipping_zone`. Unknown SKUs return defaults: "Unknown Product", General, 1.0kg, ZONE-1.
 
 ---
-*Verification status: Quarkus variant verified against Quarkus 3.39.3, Camel 4.22.0 on Podman (2026-07-11). Spring Boot variant compiles against Spring Boot 4.1.1, Camel 4.22.0.*
+*Verification status: both variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1); the chapter footer records the integration-test result on Docker Engine (2026-10-09).*

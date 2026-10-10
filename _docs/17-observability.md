@@ -25,7 +25,7 @@ mvn spring-boot:run
 ```bash
 # YAML DSL (Camel CLI)
 cd examples/17-observability/yaml-dsl
-camel run *
+camel run * --port=8082   # REST port is a CLI flag; 8080 is Pulsar's
 ```
 
 A messaging system that you can't observe is a messaging system you can't troubleshoot. When order 42 goes missing somewhere between inventory-service and payment-service, you need to answer: *Did the message arrive? Where did it go? What happened to it? How long did each step take?*
@@ -390,4 +390,4 @@ Next: testing and management patterns — Test Message, Detour, Smart Proxy, and
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.0 (Quarkus 3.39.3 / Spring Boot 4.1.1) and their 8 Citrus integration tests pass against live containers (2026-09-14).*
+*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1) and their 8 Citrus integration tests pass against live containers on Docker Engine; the YAML DSL routes run with `camel run * --port=8082`, the Control Bus answers `GET /control/status/control-bus-status` with 200, and their Citrus test passes (2026-10-09).*

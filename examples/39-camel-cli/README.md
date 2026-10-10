@@ -11,9 +11,9 @@ Two YAML DSL routes demonstrating the Camel CLI workflow from prototype to produ
 
 ## Prerequisites
 
-- **JBang with Camel CLI** — `jbang app install camel@apache/camel`
+- **JBang with Camel CLI** — `jbang app install --name camel org.apache.camel:camel-launcher:4.22.1`
 - **Java 25+**
-- **Kafka + Redis** — start the Podman stack from the project root:
+- **Kafka + Redis** — start the compose stack from the project root:
   ```bash
   ./scripts/setup-stack.sh
   ```
@@ -23,18 +23,19 @@ Two YAML DSL routes demonstrating the Camel CLI workflow from prototype to produ
 Start both routes with the Camel CLI:
 
 ```bash
-# Run in standard mode
-camel run *.yaml
+# Run in standard mode. --port is a CLI flag, not a property: without it the
+# REST API binds 8080, which the stack's Pulsar already holds.
+camel run *.yaml --port=8088
 
 # Run in dev mode (live reload on file changes)
-camel run --dev *.yaml
+camel run --dev *.yaml --port=8088
 ```
 
 ## CLI workflow walkthrough
 
 1. **Run the routes**
    ```bash
-   camel run *.yaml
+   camel run *.yaml --port=8088
    ```
 
 2. **Trace live exchanges**
@@ -65,7 +66,7 @@ Submit an express order:
 curl -X POST http://localhost:8088/api/orders \
   -H "Content-Type: application/json" \
   -H "orderType: EXPRESS" \
-  -d '{"orderId":"ORD-9001","customerId":"CUST-42","item":"Wireless Headphones","quantity":2}'
+  -d '{"orderId":"ORD-9001","customerId":"C-500","item":"Wireless Headphones","quantity":2}'
 ```
 
 Submit a standard order:

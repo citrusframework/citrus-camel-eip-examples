@@ -215,7 +215,7 @@ You can scale competing consumers at two levels:
 
 1. **Within a single application** — Increase `consumersCount` to add more consumer threads. Each thread is assigned partitions by Kafka's group coordinator. Maximum useful value = partition count of the topic.
 
-2. **Across multiple application instances** — Deploy multiple copies of the service (via Kubernetes replicas, Podman instances, etc.). Each instance joins the same consumer group and is assigned a subset of partitions.
+2. **Across multiple application instances** — Deploy multiple copies of the service (via Kubernetes replicas, extra containers, etc.). Each instance joins the same consumer group and is assigned a subset of partitions.
 
 {% include excalidraw.html file="14-consumer-scaling" alt="Two application instances each with two consumer threads, distributing 12 Kafka partitions evenly — 3 partitions per thread" caption="Figure 14.1 — Competing consumer scaling: 2 instances × 2 threads = 4 consumers, each assigned 3 of 12 partitions." %}
 
@@ -333,4 +333,4 @@ Next: producer-side patterns, transactional messaging, and durable subscribers.
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.0 (Quarkus 3.39.3 / Spring Boot 4.1.1) and their 18 Citrus integration tests pass against live containers (2026-09-14).*
+*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1) and their 18 Citrus integration tests pass against live containers on Docker Engine; the YAML DSL routes run clean, its 5 Citrus tests pass, and the SQL Polling Consumer picks up a `PLACED` row from the stack's `eipdb` and marks it `PROCESSING` (2026-10-09).*

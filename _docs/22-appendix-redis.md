@@ -28,7 +28,7 @@ mvn spring-boot:run
 
 ## Redis in the shipping domain
 
-Our Podman stack runs Redis on port 6379. In the shipping domain, Redis serves four roles:
+Our compose stack runs Redis on port 6379. In the shipping domain, Redis serves four roles:
 
 | Role | Pattern | Example |
 |------|---------|---------|
@@ -208,4 +208,4 @@ quarkus.redis.max-pool-waiting=50
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.0 (Quarkus 3.39.3 / Spring Boot 4.1.1) and their 8 Citrus integration tests pass against live containers (2026-09-14).*
+*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1) and their 8 Citrus integration tests pass against live containers on Docker Engine (2026-10-09).*

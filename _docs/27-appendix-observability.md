@@ -462,7 +462,7 @@ java -jar target/quarkus-app/quarkus-run.jar &
 
 for i in 1 2 3 4 5; do
   echo "{\"order_id\":\"ORD-100$i\",\"customer\":\"acme\",\"amount\":$((i*250)).50}"
-done | podman exec -i eip-kafka /opt/kafka/bin/kafka-console-producer.sh \
+done | docker exec -i eip-kafka /opt/kafka/bin/kafka-console-producer.sh \
   --bootstrap-server localhost:9092 --topic eip.orders.placed
 ```
 
@@ -489,4 +489,4 @@ problem described in [getting all three signals](#getting-all-three-signals).
 
 ---
 
-*Verification status: <span class="status status--verified">verified</span> — the LGTM overlay was brought up with `./scripts/setup-stack.sh --lgtm` and both runtime variants were run against it on 2026-09-15. Five orders through `eip.orders.placed` produced searchable `eip.orders.placed` traces in Tempo, `camel_exchanges_total` carrying its `routeId` label in Mimir, and the routes' log lines in Loki, on Quarkus 3.39.3 and Spring Boot 4.1.1 with Camel 4.22.0. The 6 Citrus integration tests also pass, but they exercise route logic only and are not evidence for anything on this page.*
+*Verification status: <span class="status status--verified">verified</span> — both runtime variants build against Camel 4.22.1 (Quarkus 3.40.1 / Spring Boot 4.1.1) and their 6 Citrus integration tests pass on Docker Engine; run against `setup-stack.sh --lgtm` with orders sent to `eip.orders.placed`, Tempo returns the routes' traces (10 from the Spring Boot run) and Mimir has `camel_exchanges_total` series (2026-10-09).*

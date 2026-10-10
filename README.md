@@ -1,16 +1,32 @@
 # Enterprise Integration Patterns with Apache Camel
 
-A comprehensive guide to the **65 Enterprise Integration Patterns** (Hohpe & Woolf) — implemented with Apache Camel on three runtimes (Quarkus, Spring Boot, and YAML DSL), backed by Kafka, Pulsar, and Redis, with runnable examples on Podman.
+A comprehensive guide to the **65 Enterprise Integration Patterns** (Hohpe & Woolf) — implemented with Apache Camel on three runtimes (Quarkus, Spring Boot, and YAML DSL), backed by Kafka, Pulsar, and Redis, with runnable examples on Docker Engine.
 
 **[Read the tutorial](https://patterncatalyst.github.io/enterprise-integration-patterns-with-camel/)**
 
 ## What's inside
 
-- **44 tutorial chapters** — 10 parts covering all 65 EIP patterns, from integration styles through system management, plus 25 deep-dive appendices.
-- **67 Excalidraw diagrams** — visual architecture and pattern flow diagrams with EIP stencil icons embedded throughout.
-- **37 runnable examples** — Camel projects (Quarkus and Spring Boot variants) you can build and run against a local Podman stack, plus operational scripts for the Kafka appendices, including Loan Broker and Bond Trading case studies.
+- **45 tutorial chapters** — 10 parts covering all 65 EIP patterns, from integration styles through system management, plus 26 deep-dive appendices.
+- **68 Excalidraw diagrams** — visual architecture and pattern flow diagrams with EIP stencil icons embedded throughout.
+- **37 runnable examples** — Camel projects (Quarkus and Spring Boot variants) you can build and run against a local Docker Compose stack, plus operational scripts for the Kafka appendices, including Loan Broker and Bond Trading case studies.
 - **Shipping domain** — A consistent e-commerce scenario (orders, inventory, payments, shipping, notifications) that drives every pattern example.
-- **Local infrastructure** — One-command Podman stack with Kafka (KRaft), Pulsar, Redis, PostgreSQL, Apicurio Registry, and an optional LGTM observability overlay (Grafana, Loki, Tempo, Mimir).
+- **Local infrastructure** — One-command compose stack with Kafka (KRaft), Pulsar, Redis, PostgreSQL, Apicurio Registry, and an optional LGTM observability overlay (Grafana, Loki, Tempo, Mimir).
+
+## Prerequisites
+
+Fedora or RHEL host (bare metal or VM).
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| JDK | 25 (Temurin 25.0.4 via SDKMAN) | `sdk install java 25.0.4-tem` |
+| Maven | 3.9+ | `sdk install maven` |
+| JBang + Camel CLI | JBang 0.142+, Camel CLI 4.22.1 | `jbang app install --name camel org.apache.camel:camel-launcher:4.22.1` |
+| Docker Engine | 29.x (`docker-ce`) on the `default` context | Runs the compose stack and the Testcontainers-backed tests; no desktop app |
+| Docker Compose | v2 plugin (`docker compose`) | Not the legacy `docker-compose` binary |
+| minikube, kubectl, Helm | 1.39+, 1.36, 3.18+/4 | Optional: Appendix T (docker driver + containerd) |
+| OpenShift Local (`crc`), `oc`, `jq` | crc 2.64+ | Optional: Appendix Z; no container engine needed |
+
+Run one local cluster at a time.
 
 ## Quick start
 
@@ -34,15 +50,14 @@ mvn spring-boot:run
 ./scripts/setup-stack.sh --lgtm
 ```
 
-Running the integration tests? Point Testcontainers at Podman first — it looks
-for a Docker socket by default, and Docker is not a dependency of this project:
+Running the integration tests? Testcontainers uses the same Docker Engine as the
+stack, on the default context — check the daemon answers first:
 
 ```bash
-systemctl --user enable --now podman.socket
-export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"
+docker info >/dev/null && echo ok
 
 # Tests bind the same ports as the dev stack, so stop it first
-podman-compose -p eip -f examples/_infra/compose.yaml down
+docker compose -p eip -f examples/_infra/compose.yaml down
 ./scripts/build-all-examples.sh --with-tests
 ```
 
@@ -83,7 +98,8 @@ See [Prerequisites & Setup](https://patterncatalyst.github.io/enterprise-integra
 | `examples/32-kafka-consumer-tuning` | Throughput-tuned, safety-first, and static-membership consumers | Appendix N |
 | `examples/33-kafka-producer-tuning` | Batched, compressed, idempotent, and synchronous producers | Appendix O |
 | `examples/37-testing-strategies` | Three-tier testing: unit (MockEndpoint), integration (REST Assured), Newman | Appendix S |
-| `examples/38-kubernetes-deploy` | Standard Maven-based container builds and Kubernetes deployment on Minikube | Appendix T |
+| `examples/38-kubernetes-deploy` | Containerfile builds and Kubernetes deployment on minikube (docker driver, containerd, Strimzi) | Appendix T |
+| `openshift/` + `examples/38-kubernetes-deploy/quarkus` | The same pipeline on OpenShift Local: AMQ Streams, in-cluster S2I build, Helm chart under restricted-v2, edge-TLS Routes | Appendix Z |
 | `examples/39-camel-cli` | CLI prototype-to-production workflow with content-based routing and Redis enrichment | Appendix U |
 | `examples/40-camel-tui` | TUI dashboard demo with order validation, data generation, and multi-step processing | Appendix V |
 | `examples/41-citrus-testing` | End-to-end integration testing with Citrus, Kafka, and HTTP validation | Appendix W |
@@ -105,15 +121,15 @@ Examples with `quarkus/` and `spring-boot/` subdirectories support both runtimes
 | 6 | Message Transformation | Translator, Enricher, Content Filter, Normalizer, Canonical Model |
 | 7 | Messaging Endpoints | Gateway, Consumers, Dispatcher, Idempotent Receiver, Service Activator |
 | 8 | System Management | Control Bus, Wire Tap, Message History, Message Store |
-| 9 | Appendices | Spring Boot vs Quarkus, Kafka, Pulsar, Redis, Quarkus Dev Mode, Drools, Quarkus Flow, Feature Flags, Observability, Kubernetes Deployment, Camel CLI, Camel TUI, Citrus Testing, AI and MCP, Secure by Default, Loan Broker & Bond Trading case studies, Glossary, Virtual Threads, Consumer/Producer Tuning, Share Groups, Diagnostics, Kafka Connect Offsets, Testing Strategies |
+| 9 | Appendices | Spring Boot vs Quarkus, Kafka, Pulsar, Redis, Quarkus Dev Mode, Drools, Quarkus Flow, Feature Flags, Observability, Kubernetes Deployment, OpenShift Local, Camel CLI, Camel TUI, Citrus Testing, AI and MCP, Secure by Default, Loan Broker & Bond Trading case studies, Glossary, Virtual Threads, Consumer/Producer Tuning, Share Groups, Diagnostics, Kafka Connect Offsets, Testing Strategies |
 
 ## Stack
 
 | Component | Role |
 |-----------|------|
-| Apache Camel 4.x | Integration framework (Java DSL) |
-| Quarkus 3.x | Runtime (fast startup, Dev Services, native builds) |
-| Spring Boot 4.x | Runtime (Spring ecosystem, wide adoption) |
+| Apache Camel 4.22.1 | Integration framework (Java DSL) |
+| Quarkus 3.40.1 LTS (Camel Quarkus 3.40.0) | Runtime (fast startup, Dev Services, native builds) |
+| Spring Boot 4.1.1 | Runtime (Spring ecosystem, wide adoption) |
 | Apache Kafka (KRaft) | Primary messaging backbone |
 | Apache Pulsar | Multi-tenant messaging, geo-replication |
 | Redis | Caching, idempotent repositories, Pub/Sub |
